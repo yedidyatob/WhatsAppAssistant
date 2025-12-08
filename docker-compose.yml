@@ -1,0 +1,23 @@
+version: "3.9"
+services:
+  python:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    container_name: whatsapp_summarizer
+    ports:
+      - "5001:5001"
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.node
+    volumes:
+      - ./auth:/app/auth
+    container_name: whatsapp_bot
+    depends_on:
+      - python
+    environment:
+      FLASK_URL: "http://python:5001/process"  # Python service internal hostname
+    restart: unless-stopped
