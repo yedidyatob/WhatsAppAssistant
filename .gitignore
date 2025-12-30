@@ -4,3 +4,4 @@ auth/
 __pycache__/
 .env
 .idea/
+.playwright/
