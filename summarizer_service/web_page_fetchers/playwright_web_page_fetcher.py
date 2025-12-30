@@ -1,5 +1,6 @@
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import time
+
+from playwright.sync_api import sync_playwright
 
 
 class PlaywrightFetcher:

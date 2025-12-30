@@ -15,8 +15,18 @@ class GPTSummarizer(Summarizer):
         response = openai.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "את עוזרת אדמיניסטרציה שיודעת לסכם כתבות מהעיתון בצורה טובה."},
-                {"role": "user", "content": f"סכמי את הכתבה בכמה משפטים קצרים:\n{text}"}
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an assistant that summarizes news articles. "
+                        "Write the summary in the same language as the original article. "
+                        "Do not translate the text and do not mention the article's language."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"Summarize the following article in a few short sentences:\n{text}"
+                }
             ],
             max_completion_tokens=1000
         )

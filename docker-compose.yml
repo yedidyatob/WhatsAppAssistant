@@ -1,23 +1,29 @@
 version: "3.9"
 services:
-  python:
+  summarizer:
     build:
-      context: .
-      dockerfile: Dockerfile.python
+      context: ./summarizer_service
+      dockerfile: Dockerfile
     container_name: whatsapp_summarizer
-    ports:
-      - "5001:5001"
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:5001/health" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    env_file:
+      - .env
 
-  bot:
+  whatsapp_bot:
     build:
-      context: .
-      dockerfile: Dockerfile.node
+      context: ./whatsapp_client
+      dockerfile: Dockerfile
     volumes:
       - ./auth:/app/auth
     container_name: whatsapp_bot
     depends_on:
-      - python
-    environment:
-      FLASK_URL: "http://python:5001/process"  # Python service internal hostname
+      summarizer:
+        condition: service_healthy
+    env_file:
+      - .env
     restart: unless-stopped

@@ -7,11 +7,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
-
+root = logging.getLogger()
+if not root.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 app = Flask(__name__)
 
 extractor = TrafilaturaArticleTextExtractor()
@@ -23,6 +24,11 @@ def process():
     payload = request.get_json()
     result = communicator.process(payload)
     return jsonify(result)
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify(status="ok"), 200
 
 if __name__ == "__main__":
     app.run(port=5001, debug=True, host="0.0.0.0")

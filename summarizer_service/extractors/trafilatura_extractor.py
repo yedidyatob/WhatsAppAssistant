@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import logging
 
 from extractors.base_extractor import ArticleTextExtractor
+from extractors.json_ld_extractor import JsonLDExtractor
 
 class TrafilaturaArticleTextExtractor(ArticleTextExtractor):
 
@@ -37,10 +38,14 @@ class TrafilaturaArticleTextExtractor(ArticleTextExtractor):
             text = trafilatura.extract(html)
             if text:
                 logging.info(f"Trafilatura extracted {len(text)} characters")
-                return (title, text)
+                if text and len(text) > 800:
+                    return (title, text)
         except Exception as e:
             logging.error(f"Trafilatura extraction failed: {e}")
-
+        logging.warning("very short text, using json-ld")
+        title, text = JsonLDExtractor().extract(html)
+        if text:
+            return title, text
 
 
         # 5️⃣ Final fallback: return title only (or empty)
