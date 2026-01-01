@@ -40,10 +40,6 @@ class PlaywrightFetcher:
             context.route("**/*", block_heavy)
 
             try:
-                # Try full network idle first
-            #     page.goto(url, timeout=timeout, wait_until="networkidle")
-            # except PlaywrightTimeoutError:
-                # Fallback to DOMContentLoaded if networkidle fails
                 page.goto(url, timeout=timeout, wait_until="domcontentloaded")
             except Exception as e:
                 browser.close()
@@ -52,6 +48,3 @@ class PlaywrightFetcher:
             html = page.content()
             browser.close()
             return html
-
-# test
-# html = asyncio.run(fetch_page("https://www.calcalist.co.il/..."))
