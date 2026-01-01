@@ -110,12 +110,18 @@ async function startBot() {
                 } else {
                     console.log("Error status:", response.data.status);
                     console.log("Message:", response.data.message);
-                    await sock.sendMessage(chatId, { text: 'Error processing request' });
+                    await sock.sendMessage(chatId, { 
+                        text: `⚠️ Error: ${response.data.message || 'Could not process request'}`,
+                        quoted: msg
+                    });
                 }
 
             } catch (err) {
                 console.error("Python error:", err.message);
-                await sock.sendMessage(chatId, { text: 'Summarizer service unavailable' });
+                await sock.sendMessage(chatId, { 
+                    text: '⚠️ Summarizer service is currently unavailable.',
+                    quoted: msg
+                });
             }
         }
     });
