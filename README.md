@@ -18,6 +18,9 @@ The goal is simple:
 
 Think of it as a lightweight **WhatsApp news reader**.
 
+**Demo:**
+![Alt text](WhatappLinkReaderDemo.jpeg)
+
 ---
 
 ## 🏗️ High-Level Architecture
