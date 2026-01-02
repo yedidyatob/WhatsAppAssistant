@@ -18,8 +18,9 @@ The goal is simple:
 
 Think of it as a lightweight **WhatsApp news reader**.
 
-**Demo:**
-![Alt text](WhatappLinkReaderDemo.jpeg)
+### Demo
+
+<img src="./WhatappLinkReaderDemo.jpeg" width="240" alt="Demo Image">
 
 ---
 
