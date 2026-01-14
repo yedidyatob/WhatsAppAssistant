@@ -14,16 +14,18 @@ services:
     env_file:
       - .env
 
-  whatsapp_bot:
+  whatsapp_gateway:
     build:
       context: ./whatsapp_client
       dockerfile: Dockerfile
     volumes:
       - ./auth:/app/auth
-    container_name: whatsapp_bot
+    container_name: whatsapp_gateway
     depends_on:
       summarizer:
         condition: service_healthy
     env_file:
       - .env
     restart: unless-stopped
+    ports:
+      - "3000:3000"
