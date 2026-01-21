@@ -219,33 +219,6 @@ class WhatsAppEventService:
             )
             return True, None
 
-        if command == "schedule":
-            try:
-                parsed = self._parse_schedule(text)
-            except ValueError as exc:
-                return False, str(exc)
-
-            try:
-                scheduled = self.timed_service.schedule_message(
-                    chat_id=parsed["to_chat_id"] or chat_id,
-                    text=parsed["text"],
-                    send_at=parsed["send_at"],
-                    idempotency_key=message_id,
-                    source="whatsapp",
-                    reason=f"whatsapp:{message_id}",
-                )
-            except ValueError as exc:
-                self._send_reply(chat_id, f"❌ {exc}", message_id)
-                return False, str(exc)
-
-            reply = self._format_schedule_reply(
-                scheduled_id=str(scheduled.id),
-                to_value=parsed.get("to_chat_id") or chat_id,
-                send_at=parsed["send_at"],
-            )
-            self._send_reply(chat_id, reply, message_id)
-            return True, None
-
         if command == "cancel":
             try:
                 msg_id = self._resolve_cancel_id(text, quoted_text)
@@ -405,12 +378,12 @@ class WhatsAppEventService:
                 return True, None
             flow["send_at"] = send_at
             flow["step"] = "text"
-            self._send_reply(chat_id, "What should I say?", message_id)
+            self._send_reply(chat_id, "*What should I say?*", message_id)
             return True, None
 
         if step == "text":
             if not text.strip():
-                self._send_reply(chat_id, "❌ Message text can't be empty. What should I say?", message_id)
+                self._send_reply(chat_id, "❌ Message text can't be empty. *What should I say?*", message_id)
                 return True, None
             try:
                 scheduled = self.timed_service.schedule_message(
@@ -434,40 +407,6 @@ class WhatsAppEventService:
             return True, None
 
         return False, "not_actionable"
-
-    def _parse_schedule(self, text: str) -> dict[str, object]:
-        """
-        Strict format:
-        schedule
-        to: <chat_id or @mention>
-        at: 2026-01-20 16:00
-        text: Reminder: pay rent
-        """
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if not lines or lines[0].lower() != "schedule":
-            raise ValueError("schedule must start with a 'schedule' line")
-
-        fields: dict[str, str] = {}
-        for line in lines[1:]:
-            if ":" not in line:
-                raise ValueError("schedule lines must be in 'key: value' format")
-            key, value = line.split(":", 1)
-            key = key.strip().lower()
-            value = value.strip()
-            if not value:
-                raise ValueError(f"'{key}' value is required")
-            fields[key] = value
-
-        to_value = fields.get("to")
-        at_value = fields.get("at")
-        text_value = fields.get("text")
-        tz_value = fields.get("tz") or os.getenv("DEFAULT_TIMEZONE")
-
-        if not at_value or not text_value:
-            raise ValueError("schedule requires 'at' and 'text' fields")
-
-        send_at = self._parse_datetime(at_value, tz_value)
-        return {"to_chat_id": to_value, "send_at": send_at, "text": text_value}
 
     def _parse_datetime(self, value: str, tz_name: str | None) -> datetime:
         value = value.strip()
