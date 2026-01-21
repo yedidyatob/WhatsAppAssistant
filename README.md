@@ -1,102 +1,114 @@
 # Personal WhatsApp Assistant 🤖📰⏱️
 
-#### Tired of digging through WhatsApp noise?
-This project is a personal WhatsApp assistant that summarizes shared links and lets you schedule messages to be sent later.
+#### A self-hosted, modular AI concierge for message automation and intelligent link summarization.
+This suite turns WhatsApp into a proactive assistant. Instead of relying on your memory or getting distracted by link-spam, use a suite of microservices to manage your communication.
 
-The goal is simple:  
-**Turn link spam into readable summaries and send messages on your schedule.**
+- ⏱️ **Message Scheduler:** Never miss a "Happy Birthday" or a deadline again. Schedule messages to individuals or groups with a simple chat-based interface.
 
----
+- 📰 **Smart Summarizer:** Save hours of reading. Get instant, AI-generated TL;DRs of shared articles directly in the chat.
 
-## 🧠 What It Does
-
-- Summarizes links posted in chats
-- Schedules messages for a future time
-- Lets you manage scheduled messages via chat commands
-- Runs fully via Docker Compose
-
-Think of it as a lightweight **WhatsApp assistant** that helps you keep up and stay on top of reminders.
-More features are on the way.
+- 🏗️ **Modular Design:** Built on a broadcast architecture — easily add your own custom features without touching the core connection logic.
 
 ### Demo
 
 <img src="./WhatappLinkReaderDemo.jpeg" width="240" alt="Summarizer Demo Image">
-<img src="./TimedMessagesDemo.jpeg" width="240" alt="Timed Messages Demo Image">
+ <img src="./TimedMessagesDemo.jpeg" width="240" alt="Timed Messages Demo Image">
 
 ---
 
-## 🏗️ High-Level Architecture
-
-The system runs as multiple services:
-
-### 1. WhatsApp Gateway (Node.js)
-- Built on **Baileys** (WhatsApp Web client)
-- Handles login, message events, and replies
-- Automatically reconnects if the connection drops
-
-### 2. Summarization Service (Python)
-- Extracts URLs from text
-- Fetches article content using **Playwright** (handles dynamic JS sites)
-- Extracts clean text using **Trafilatura** (with JSON-LD fallback)
-- Calls **OpenAI GPT** to generate summaries
-
-### 3. Timed Messages Service (Python + Postgres)
-- Accepts add/list/cancel commands
-- Stores schedules in Postgres DB
-- A worker delivers messages at the right time
-
-All services are orchestrated with **Docker Compose**.
-
 ---
 
-## ⚙️ Configuration & Usage
+## 🚀 Getting Started
+##### 1. Prerequisites
+- **Docker & Docker Compose** installed.
+- An **OpenAI API Key** (for the summarizer, not necessary for just the scheduler).
+- A WhatsApp account to link (a secondary account is recommended).
 
-### 1. Clone the Repository
+##### 2. Installation & Configuration
+1. **Clone the repository:**
 ```bash
 git clone https://github.com/yedidyatob/WhatsAppLinkReader.git
 cd WhatsAppLinkReader
 ```
+2. **Prepare environment variables:**
 
-### 2. Environment Variables
-This project uses environment variables for secrets and configuration. An example file is provided:
 ```bash
 cp .env.example .env
 ```
-Edit `.env` and provide the required values:
+Edit `.env` and provide your `OPENAI_API_KEY` and `DEFAULT_TIMEZONE` (e.g., `Asia/Jerusalem`).
 
-- `OPENAI_API_KEY` – API key for the LLM used for summarization (GPT)
-- `WHATSAPP_GATEWAY_URL` - Base URL used by services to send replies via the gateway.
-- `WHATSAPP_EVENT_TARGETS` - Comma-separated list of service endpoints (default is already set). 
-- `DATABASE_URL` - Postgres DSN for the timed messages service.
-- `DEFAULT_TIMEZONE` - IANA timezone for scheduling (e.g. `UTC`, `America/New_York`).
-
-Runtime settings live in `config/`:
-- `config/summarizer_runtime.json` – allowed group IDs for summarization.
-- `config/common_runtime.json` – admin sender ID for timed messages.
-- `config/timed_messages_runtime.json` – scheduling group + admin setup code.
-
-### 3. Running
+3. **Launch the suite:**
 ```bash
 docker compose up --build
 ```
-On the first run, the WhatsApp client needs to authenticate.
-- A QR code will be printed to the terminal.
-- Scan it using the WhatsApp mobile app (Linked Devices).
-- Authentication data will be saved locally in the `auth/` folder.
-- Set an admin once: check terminal output for `admin_setup_code`, then send `!whoami <code>` in WhatsApp.
 
-You're set up!
+##### 3. Initialization (The "Handshake")
+1. **Link your account**: Watch the gateway logs (`whatsapp-gateway`) and scan the QR code with your WhatsApp app.
 
-### 4. Usage
-**Summarizer**
-- Enable the Summarizer in a group with `!setup summarizer`.
-- Use the key phrase **"@bot"** - anyone in the group can use it.
-- **Direct Message:** Send a message containing a link and `@bot`.
-- **Reply:** Reply to a message containing a link with `@bot`.
+2. **Claim Admin rights:** Find the `admin_setup_code` in the logs. In WhatsApp, send the bot a private message: `!whoami <your_code>`.
 
-**Timed Messages**
-- Enable scheduling in a group with `!setup timed messages`.
-- Commands: `add` (interactive), `list`, `cancel`, `instructions`.
+3. **Activate in groups:** To enable features in a specific group, send:
+
+- `!setup timed messages`
+
+- `!setup summarizer`
+
+## 📱 How to Use
+
+| Feature          | Usage                                                                                     |
+|------------------|-------------------------------------------------------------------------------------------|
+| **Schedule Message** | Type `add`. The bot will guide you through an interactive flow to set the content and time. |
+| **Manage Schedule**  | Use `list` to see all pending messages or reply `cancel` to a scheduled message to remove it.                             |
+| **Summarize Link**   | Tag the bot with `@bot` in a message with a link, or **Reply** to any link with `@bot`.           |
+
+---
+
+## ⚙️ Technical Deep Dive
+
+##### Asynchronous Microservices Architecture
+This suite operates on a **decoupled push-pull model**, ensuring the WhatsApp connection remains stable even during heavy processing or long wait times.
+
+1. **The Broadcast:** When a message arrives, the **Gateway (Node.js)** sends an HTTP POST (Webhook) to all service URLs in `.env`. It expects a `200 OK` status immediately to keep the connection fluid.
+
+2. **The Processing:** Services (Python) process the data independently.
+
+- **Timed Messages Service:** Monitors a **PostgreSQL** database. A dedicated worker "sleeps and polls" the DB to trigger message delivery with high reliability.
+
+- **Summarizer Service:** Uses **Playwright** to render JS-heavy sites and **Trafilatura** for text extraction before calling the OpenAI API.
+
+3. **The Callback:** When a service is ready to reply, it hits the Gateway's `/send` endpoint. This allows tasks to take as long as they need without blocking the Gateway.
+
+##### Persistence Layers
+- **Relational Data: PostgreSQL** stores the message queue for the scheduler, ensuring your tasks survive a container restart.
+
+- **Hot-Reloading Config**: Group permissions and Admin settings are stored in shared `/config` JSON files allowing updates without restarts.
+
+- **Session State:** Saved in the `/auth` volume to persist the WhatsApp Web login.
+
+### 🛠️ Extending the Suite (Add Your Own Service)
+The architecture is designed for growth. You can add a new service (e.g., "Weather Alerts" or "Stock Tracker") in minutes.
+
+1. **Create your worker**
+Your service just needs to listen for a POST request and call the Gateway's `/send` endpoint when it wants to talk back.
+
+```python
+# Quick Python Example
+import requests
+from fastapi import FastAPI, Request
+
+app = FastAPI()
+GATEWAY_URL = "http://whatsapp-gateway:3000/send"
+
+@app.post("/webhook")
+async def handle_event(request: Request):
+    data = await request.json()
+    if data.get("text") == "!ping":
+        requests.post(GATEWAY_URL, json={"chatId": data.get("chatId"), "text": "Pong! 🏓"})
+    return {"status": "received"}
+```
+
+2. **Update Environment**
+Append your new service URL to `WHATSAPP_EVENT_TARGETS` in your `.env`.
 
 #### Troubleshooting
 If you are logged out of WhatsApp or get a connection error loop,
@@ -107,18 +119,7 @@ rm -rf auth
 
 ---
 
-## ⚠️ Disclaimer
+## ⚠️ Disclaimer & License
 
-> **This project is for educational and experimental purposes only.**
-
-- Uses unofficial WhatsApp Web behavior.
-- Not affiliated with or endorsed by WhatsApp.
-- May violate WhatsApp’s Terms of Service if misused.
-- You are responsible for legal and platform compliance.
-
----
-
-## 📄 License
-
-This project is licensed under the **MIT License**.  
-See the `LICENSE` file for details.
+⚠️ Disclaimer & License
+**MIT License.** This project is for educational use and uses an unofficial WhatsApp API. Use responsibly to avoid account flagging.
