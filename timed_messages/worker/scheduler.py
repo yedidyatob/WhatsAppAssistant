@@ -46,16 +46,21 @@ class TimedMessageWorker:
         )
 
         if not due_messages:
+            logger.debug("No due messages")
             time.sleep(self.poll_interval_seconds)
             return
 
+        logger.info("Found %d due message(s)", len(due_messages))
+
         for msg in due_messages:
             try:
+                logger.info("Sending message %s to %s", msg.id, msg.chat_id)
                 self.service.send_message_if_due(
                     msg_id=msg.id,
                     transport=self.transport,
                     quoted_message_id=None
                 )
+                logger.info("Sent message %s", msg.id)
             except Exception:
                 # already recorded as FAILED by service
                 logger.exception(

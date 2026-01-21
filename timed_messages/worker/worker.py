@@ -1,4 +1,5 @@
 import logging
+import os
 from ..infra.db import get_connection
 from ..infra.repo_sql import PostgresScheduledMessageRepository
 from ..core.service import TimedMessageService
@@ -6,7 +7,9 @@ from .scheduler import TimedMessageWorker
 from ..transport.whatsapp import WhatsAppTransport
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=getattr(logging, os.getenv("LOG_LEVEL", "ERROR").upper(), logging.ERROR)
+)
 
 conn = get_connection()
 repo = PostgresScheduledMessageRepository(conn)

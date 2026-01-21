@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import UUID
 
 import psycopg2
@@ -75,6 +75,21 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
             row = cur.fetchone()
             return self._row_to_model(row) if row else None
 
+    def find_by_id_prefix(self, prefix: str, limit: int = 2) -> list[ScheduledMessage]:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM scheduled_messages
+                WHERE REPLACE(id::text, '-', '') LIKE %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (f"{prefix}%", limit),
+            )
+            rows = cur.fetchall()
+            return [self._row_to_model(r) for r in rows]
+
     def find_due(self, now: datetime, limit: int) -> list[ScheduledMessage]:
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -87,6 +102,21 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
                 LIMIT %s
                 """,
                 (now, limit),
+            )
+            rows = cur.fetchall()
+            return [self._row_to_model(r) for r in rows]
+
+    def find_scheduled(self, limit: int) -> list[ScheduledMessage]:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM scheduled_messages
+                WHERE status = 'SCHEDULED'
+                ORDER BY send_at
+                LIMIT %s
+                """,
+                (limit,),
             )
             rows = cur.fetchall()
             return [self._row_to_model(r) for r in rows]
@@ -112,8 +142,7 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
                     now,
                     now,
                     msg_id,
-                    now.replace(tzinfo=timezone.utc)
-                    - psycopg2.extensions.timedelta(seconds=LOCK_TIMEOUT_SECONDS),
+                    now - timedelta(seconds=LOCK_TIMEOUT_SECONDS),
                 ),
             )
             return cur.rowcount == 1
@@ -164,6 +193,39 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
                 (now, msg_id),
             )
 
+    def get_by_id(self, msg_id: UUID) -> ScheduledMessage | None:
+        return self.get(msg_id)
 
+    def list_upcoming(self, now: datetime, limit: int) -> list[ScheduledMessage]:
+        return self.find_due(now, limit)
 
+    def list_scheduled(self, limit: int) -> list[ScheduledMessage]:
+        return self.find_scheduled(limit)
 
+    def lock_for_sending(self, msg_id: UUID, now: datetime) -> bool:
+        return self.lock(msg_id, now)
+
+    def update_metadata(self, msg_id: UUID, message: ScheduledMessage) -> None:
+        payload = message.model_dump()
+        payload["id"] = msg_id
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE scheduled_messages
+                SET
+                    chat_id = %(chat_id)s,
+                    text = %(text)s,
+                    send_at = %(send_at)s,
+                    status = %(status)s,
+                    locked_at = %(locked_at)s,
+                    sent_at = %(sent_at)s,
+                    attempt_count = %(attempt_count)s,
+                    last_error = %(last_error)s,
+                    idempotency_key = %(idempotency_key)s,
+                    source = %(source)s,
+                    reason = %(reason)s,
+                    updated_at = %(updated_at)s
+                WHERE id = %(id)s
+                """,
+                payload,
+            )

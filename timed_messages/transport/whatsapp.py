@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -5,7 +6,8 @@ from typing import Optional, Dict, Any
 import requests
 from uuid import UUID
 
-DEFAULT_GATEWAY_URL = "http://localhost:3000"
+DEFAULT_GATEWAY_URL = "http://whatsapp_gateway:3000"
+logger = logging.getLogger(__name__)
 
 # ---------- Outbound ----------
 class WhatsAppGatewayError(RuntimeError):
@@ -63,8 +65,12 @@ class WhatsAppTransport:
             )
 
 # ---------- Inbound ----------
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
+
+from ..core.service import TimedMessageService, WhatsAppEventService
+from ..infra.db import get_connection
+from ..infra.repo_sql import PostgresScheduledMessageRepository
 
 
 class WhatsAppInboundEvent(BaseModel):
@@ -74,6 +80,9 @@ class WhatsAppInboundEvent(BaseModel):
     sender_id: str
     is_group: bool
     text: Optional[str] = None
+    quoted_text: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
     raw: Optional[Dict[str, Any]] = None
 
 class WhatsAppEventResponse(BaseModel):
@@ -84,8 +93,23 @@ class WhatsAppEventResponse(BaseModel):
 
 router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
+
+def get_event_service():
+    conn = get_connection()
+    try:
+        repo = PostgresScheduledMessageRepository(conn)
+        timed_service = TimedMessageService(repo)
+        transport = WhatsAppTransport()
+        yield WhatsAppEventService(timed_service, transport)
+    finally:
+        conn.close()
+
+
 @router.post("/events", response_model=WhatsAppEventResponse)
-def receive_whatsapp_event(event: WhatsAppInboundEvent):
+def receive_whatsapp_event(
+    event: WhatsAppInboundEvent,
+    service: WhatsAppEventService = Depends(get_event_service),
+):
     """
     Inbound WhatsApp event from Baileys.
 
@@ -95,21 +119,32 @@ def receive_whatsapp_event(event: WhatsAppInboundEvent):
     - Return acknowledgment
     """
 
-    service = WhatsAppEventService() # TODO: ????
-
     try:
         accepted, reason = service.handle_inbound_event(
             message_id=event.message_id,
             chat_id=event.chat_id,
             sender_id=event.sender_id,
             text=event.text,
+            quoted_text=event.quoted_text,
+            contact_name=event.contact_name,
+            contact_phone=event.contact_phone,
             timestamp=datetime.fromtimestamp(event.timestamp),
             is_group=event.is_group,
             raw=event.raw,
         )
     except Exception as e:
         # Transport-level failure (not WhatsApp-visible)
+        logger.exception("Failed handling WhatsApp event")
         raise HTTPException(status_code=500, detail=str(e))
+
+    if not accepted:
+        logger.warning(
+            "WhatsApp event rejected reason=%s chat_id=%s sender_id=%s text=%r",
+            reason,
+            event.chat_id,
+            event.sender_id,
+            event.text,
+        )
 
     return WhatsAppEventResponse(
         accepted=accepted,

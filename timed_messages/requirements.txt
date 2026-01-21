@@ -1,0 +1,7 @@
+alembic
+fastapi
+pydantic
+psycopg2-binary
+requests
+sqlalchemy
+uvicorn
