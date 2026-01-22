@@ -11,11 +11,9 @@ This suite turns WhatsApp into a proactive assistant. Instead of relying on your
 
 ### Demo
 
-<img src="./WhatappLinkReaderDemo.jpeg" width="240" alt="Summarizer Demo Image">
- <img src="./TimedMessagesDemo.jpeg" width="240" alt="Timed Messages Demo Image">
-
----
-
+| Link Summarizer | Message Scheduler |
+| :---: | :---: |
+| <img src="./WhatappLinkReaderDemo.jpeg" width="280" alt="Summarizer Demo"> | <img src="./TimedMessagesDemo.jpeg" width="280" alt="Timed Messages Demo"> |
 ---
 
 ## 🚀 Getting Started
@@ -58,7 +56,7 @@ docker compose up --build
 | Feature          | Usage                                                                                     |
 |------------------|-------------------------------------------------------------------------------------------|
 | **Schedule Message** | Type `add`. The bot will guide you through an interactive flow to set the content and time. |
-| **Manage Schedule**  | Use `list` to see all pending messages or reply `cancel` to a scheduled message to remove it.                             |
+| **Manage Schedule**  | Use `list` to see pending messages. To delete one, simply **Reply** to the bot's "Scheduled..." confirmation message with the word `cancel` .                             |
 | **Summarize Link**   | Tag the bot with `@bot` in a message with a link, or **Reply** to any link with `@bot`.           |
 
 ---
@@ -80,6 +78,7 @@ This suite operates on a **decoupled push-pull model**, ensuring the WhatsApp co
 
 #### Persistence Layers
 - **Relational Data: PostgreSQL** stores the message queue for the scheduler, ensuring your tasks survive a container restart.
+- **Contextual Commands:** The Timed Messages service tracks the Message IDs of its confirmations. When a user replies cancel to a specific confirmation, the service retrieves the linked task from PostgreSQL and removes it, allowing for precise management.
 
 - **Hot-Reloading Config**: Group permissions and Admin settings are stored in shared `/config` JSON files allowing updates without restarts.
 
@@ -120,6 +119,4 @@ rm -rf auth
 ---
 
 ## ⚠️ Disclaimer & License
-
-⚠️ Disclaimer & License
 **MIT License.** This project is for educational use and uses an unofficial WhatsApp API. Use responsibly to avoid account flagging.
