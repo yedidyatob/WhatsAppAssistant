@@ -19,12 +19,12 @@ This suite turns WhatsApp into a proactive assistant. Instead of relying on your
 ---
 
 ## 🚀 Getting Started
-##### 1. Prerequisites
+#### 1. Prerequisites
 - **Docker & Docker Compose** installed.
 - An **OpenAI API Key** (for the summarizer, not necessary for just the scheduler).
 - A WhatsApp account to link (a secondary account is recommended).
 
-##### 2. Installation & Configuration
+#### 2. Installation & Configuration
 1. **Clone the repository:**
 ```bash
 git clone https://github.com/yedidyatob/WhatsAppLinkReader.git
@@ -42,7 +42,7 @@ Edit `.env` and provide your `OPENAI_API_KEY` and `DEFAULT_TIMEZONE` (e.g., `Asi
 docker compose up --build
 ```
 
-##### 3. Initialization (The "Handshake")
+#### 3. Initialization (The "Handshake")
 1. **Link your account**: Watch the gateway logs (`whatsapp-gateway`) and scan the QR code with your WhatsApp app.
 
 2. **Claim Admin rights:** Find the `admin_setup_code` in the logs. In WhatsApp, send the bot a private message: `!whoami <your_code>`.
@@ -65,7 +65,7 @@ docker compose up --build
 
 ## ⚙️ Technical Deep Dive
 
-##### Asynchronous Microservices Architecture
+#### Asynchronous Microservices Architecture
 This suite operates on a **decoupled push-pull model**, ensuring the WhatsApp connection remains stable even during heavy processing or long wait times.
 
 1. **The Broadcast:** When a message arrives, the **Gateway (Node.js)** sends an HTTP POST (Webhook) to all service URLs in `WHATSAPP_EVENT_TARGETS`.
@@ -78,7 +78,7 @@ This suite operates on a **decoupled push-pull model**, ensuring the WhatsApp co
 
 3. **The Callback:** When a service is ready to reply, it calls the Gateway's `/send` endpoint with `{ "to": "<chat_id>", "text": "..." }`. This allows tasks to take as long as they need without blocking the Gateway.
 
-##### Persistence Layers
+#### Persistence Layers
 - **Relational Data: PostgreSQL** stores the message queue for the scheduler, ensuring your tasks survive a container restart.
 
 - **Hot-Reloading Config**: Group permissions and Admin settings are stored in shared `/config` JSON files allowing updates without restarts.
