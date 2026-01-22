@@ -380,6 +380,9 @@ class WhatsAppEventService:
             except ValueError:
                 self._send_reply(chat_id, f"❌ Invalid time. {self._format_when_prompt()}", message_id)
                 return True, None
+            if send_at <= self._now():
+                self._send_reply(chat_id, f"❌ Time must be in the future. {self._format_when_prompt()}", message_id)
+                return True, None
             flow["send_at"] = send_at
             flow["step"] = "text"
             self._send_reply(chat_id, "*What should I say?*", message_id)
@@ -399,6 +402,10 @@ class WhatsAppEventService:
                     reason=f"whatsapp:{flow.get('request_id')}",
                 )
             except ValueError as exc:
+                if str(exc) == "send_at must be in the future":
+                    flow["step"] = "when"
+                    self._send_reply(chat_id, f"❌ Time must be in the future. {self._format_when_prompt()}", message_id)
+                    return True, str(exc)
                 self._send_reply(chat_id, f"❌ {exc}", message_id)
                 return True, str(exc)
             reply = self._format_schedule_reply(
