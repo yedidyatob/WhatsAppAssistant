@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 import requests
@@ -128,7 +128,7 @@ def receive_whatsapp_event(
             quoted_text=event.quoted_text,
             contact_name=event.contact_name,
             contact_phone=event.contact_phone,
-            timestamp=datetime.fromtimestamp(event.timestamp),
+            timestamp=datetime.fromtimestamp(event.timestamp, tz=timezone.utc),
             is_group=event.is_group,
             raw=event.raw,
         )

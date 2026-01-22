@@ -116,7 +116,11 @@ class TimedMessageService:
         if not msg:
             return
 
-        if msg.status != MessageStatus.SCHEDULED:
+        if msg.status in {
+            MessageStatus.CANCELLED,
+            MessageStatus.SENT,
+            MessageStatus.FAILED,
+        }:
             return
 
         if msg.send_at > now:
@@ -492,7 +496,6 @@ class WhatsAppEventService:
         return match.group(1) if match else None
 
     def _format_schedule_reply(self, *, scheduled_id: str, to_value: str, send_at: datetime) -> str:
-        # TODO: Resolve display names for @mentions instead of echoing raw to_value.
         display_at = self._format_datetime(send_at)
         short_id = scheduled_id.replace("-", "")[:12]
         return (

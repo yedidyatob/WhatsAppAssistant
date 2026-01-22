@@ -1,6 +1,5 @@
 import time
 import logging
-from datetime import timezone
 
 from ..core.service import TimedMessageService
 from ..transport.whatsapp import WhatsAppTransport

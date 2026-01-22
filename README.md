@@ -68,7 +68,7 @@ docker compose up --build
 ##### Asynchronous Microservices Architecture
 This suite operates on a **decoupled push-pull model**, ensuring the WhatsApp connection remains stable even during heavy processing or long wait times.
 
-1. **The Broadcast:** When a message arrives, the **Gateway (Node.js)** sends an HTTP POST (Webhook) to all service URLs in `.env`. It expects a `200 OK` status immediately to keep the connection fluid.
+1. **The Broadcast:** When a message arrives, the **Gateway (Node.js)** sends an HTTP POST (Webhook) to all service URLs in `WHATSAPP_EVENT_TARGETS`.
 
 2. **The Processing:** Services (Python) process the data independently.
 
@@ -76,7 +76,7 @@ This suite operates on a **decoupled push-pull model**, ensuring the WhatsApp co
 
 - **Summarizer Service:** Uses **Playwright** to render JS-heavy sites and **Trafilatura** for text extraction before calling the OpenAI API.
 
-3. **The Callback:** When a service is ready to reply, it hits the Gateway's `/send` endpoint. This allows tasks to take as long as they need without blocking the Gateway.
+3. **The Callback:** When a service is ready to reply, it calls the Gateway's `/send` endpoint with `{ "to": "<chat_id>", "text": "..." }`. This allows tasks to take as long as they need without blocking the Gateway.
 
 ##### Persistence Layers
 - **Relational Data: PostgreSQL** stores the message queue for the scheduler, ensuring your tasks survive a container restart.
@@ -89,7 +89,7 @@ This suite operates on a **decoupled push-pull model**, ensuring the WhatsApp co
 The architecture is designed for growth. You can add a new service (e.g., "Weather Alerts" or "Stock Tracker") in minutes.
 
 1. **Create your worker**
-Your service just needs to listen for a POST request and call the Gateway's `/send` endpoint when it wants to talk back.
+Your service just needs to listen for a POST request, and call the Gateway's `/send` endpoint when it wants to talk back.
 
 ```python
 # Quick Python Example
@@ -99,12 +99,12 @@ from fastapi import FastAPI, Request
 app = FastAPI()
 GATEWAY_URL = "http://whatsapp-gateway:3000/send"
 
-@app.post("/webhook")
+@app.post("/whatsapp/events")
 async def handle_event(request: Request):
     data = await request.json()
-    if data.get("text") == "!ping":
-        requests.post(GATEWAY_URL, json={"chatId": data.get("chatId"), "text": "Pong! 🏓"})
-    return {"status": "received"}
+    if (data.get("text") or "").strip().lower() == "!ping":
+        requests.post(GATEWAY_URL, json={"to": data.get("chat_id"), "text": "Pong! 🏓"})
+    return {"status": "ok"}
 ```
 
 2. **Update Environment**

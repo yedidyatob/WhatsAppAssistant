@@ -28,53 +28,6 @@ class UrlCommunicator:
             logger.info("Extracted URL: %s", match.group(0))
         return match.group(0) if match else None
 
-    def process(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        text = payload.get("text", "")
-
-        url = self.extract_url(text)
-        if not url:
-            error_msg = "NO_URL"
-            logger.error("Error processing request: %s", error_msg)
-            return {"status": "error", "message": error_msg}
-
-        # Try extracting page
-        try:
-            html = self.fetcher.fetch(url)
-            page_title, page_text = self.extractor.extract(html)
-            logger.info(
-                "Extracted page content: title=%r, text_length=%s",
-                page_title,
-                len(page_text or ""),
-            )
-        except Exception as e:
-            logger.exception("Extraction failed for URL: %s", url)
-            return {
-                "status": "error",
-                "type": "EXTRACTION_ERROR",
-                "message": str(e),
-                "url": url
-            }
-
-        # Try summarizing page
-        try:
-            summary = self.summarizer.summarize(page_text)
-            logger.info("Summary generated: length=%s", len(summary or ""))
-        except Exception as e:
-            logger.exception("Summarization failed for URL: %s", url)
-            return {
-                "status": "error",
-                "type": "SUMMARY_ERROR",
-                "message": str(e),
-                "url": url
-            }
-            
-        logger.info("Successfully processed URL: %s", url)
-        return {
-            "status": "ok",
-            "url": url,
-            "summary": summary
-        }
-
     def process_whatsapp_event(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         chat_id = payload.get("chat_id")
         text = payload.get("text") or ""
@@ -102,7 +55,7 @@ class UrlCommunicator:
             len(input_text),
         )
 
-        result = self.process({"text": input_text})
+        result = self._summarize_text(input_text)
         if result.get("status") == "ok":
             reply = result.get("summary") or "✅ Done"
             logger.info(
@@ -136,6 +89,50 @@ class UrlCommunicator:
         self._send_whatsapp(chat_id, "✅ Summarizer disabled for this group.")
         return {"status": "ok", "accepted": True, "reason": None}
 
+    def _summarize_text(self, text: str) -> Dict[str, Any]:
+        url = self.extract_url(text)
+        if not url:
+            error_msg = "NO_URL"
+            logger.error("Error processing request: %s", error_msg)
+            return {"status": "error", "message": error_msg}
+
+        # Try extracting page
+        try:
+            html = self.fetcher.fetch(url)
+            page_title, page_text = self.extractor.extract(html)
+            logger.info(
+                "Extracted page content: title=%r, text_length=%s",
+                page_title,
+                len(page_text or ""),
+            )
+        except Exception as e:
+            logger.exception("Extraction failed for URL: %s", url)
+            return {
+                "status": "error",
+                "type": "EXTRACTION_ERROR",
+                "message": str(e),
+                "url": url,
+            }
+
+        # Try summarizing page
+        try:
+            summary = self.summarizer.summarize(page_text)
+            logger.info("Summary generated: length=%s", len(summary or ""))
+        except Exception as e:
+            logger.exception("Summarization failed for URL: %s", url)
+            return {
+                "status": "error",
+                "type": "SUMMARY_ERROR",
+                "message": str(e),
+                "url": url,
+            }
+
+        logger.info("Successfully processed URL: %s", url)
+        return {
+            "status": "ok",
+            "url": url,
+            "summary": summary,
+        }
 
     def _send_whatsapp(self, chat_id: str, text: str) -> None:
         if not chat_id or not text:

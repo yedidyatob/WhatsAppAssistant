@@ -91,17 +91,24 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
             return [self._row_to_model(r) for r in rows]
 
     def find_due(self, now: datetime, limit: int) -> list[ScheduledMessage]:
+        stale_before = now - timedelta(seconds=LOCK_TIMEOUT_SECONDS)
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
                 SELECT *
                 FROM scheduled_messages
-                WHERE status = 'SCHEDULED'
-                  AND send_at <= %s
+                WHERE (
+                    status = 'SCHEDULED'
+                    AND send_at <= %s
+                ) OR (
+                    status = 'LOCKED'
+                    AND send_at <= %s
+                    AND (locked_at IS NULL OR locked_at < %s)
+                )
                 ORDER BY send_at
                 LIMIT %s
                 """,
-                (now, limit),
+                (now, now, stale_before, limit),
             )
             rows = cur.fetchall()
             return [self._row_to_model(r) for r in rows]
@@ -132,10 +139,12 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
                     updated_at = %s
                 WHERE
                     id = %s
-                    AND status = 'SCHEDULED'
                     AND (
-                        locked_at IS NULL OR
-                        locked_at < %s
+                        status = 'SCHEDULED'
+                        OR (
+                            status = 'LOCKED'
+                            AND (locked_at IS NULL OR locked_at < %s)
+                        )
                     )
                 """,
                 (

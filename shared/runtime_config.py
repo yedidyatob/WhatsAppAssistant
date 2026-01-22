@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from pathlib import Path
 from threading import Lock
@@ -6,6 +7,7 @@ from typing import Any, Dict
 
 
 DEFAULT_COMMON_CONFIG_PATH = os.getenv("WHATSAPP_COMMON_CONFIG_PATH", "config/common_runtime.json")
+logger = logging.getLogger(__name__)
 
 
 class JsonFileConfig:
@@ -15,12 +17,12 @@ class JsonFileConfig:
         self._lock = Lock()
         self._data = self._load_from_disk()
         self._last_mtime = self._get_mtime()
-        if os.getenv("WHATSAPP_CONFIG_DEBUG") == "true":
+        if os.getenv("WHATSAPP_CONFIG_DEBUG", "").lower() == "true":
             message = self._debug_message()
             if message:
-                print(f"[{self._debug_label}] path={self._path} {message}")
+                logger.info("[%s] path=%s %s", self._debug_label, self._path, message)
             else:
-                print(f"[{self._debug_label}] path={self._path}")
+                logger.info("[%s] path=%s", self._debug_label, self._path)
 
     def _debug_message(self) -> str:
         return ""
@@ -30,7 +32,8 @@ class JsonFileConfig:
             return self._default_data()
         try:
             return json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception:
+        except Exception as exc:
+            logger.warning("[%s] failed to parse %s: %s", self._debug_label, self._path, exc)
             return self._default_data()
 
     def _write_to_disk(self, data: Dict[str, Any]) -> None:
@@ -53,12 +56,12 @@ class JsonFileConfig:
             return
         self._data = self._load_from_disk()
         self._last_mtime = current
-        if os.getenv("WHATSAPP_CONFIG_DEBUG") == "true":
+        if os.getenv("WHATSAPP_CONFIG_DEBUG", "").lower() == "true":
             message = self._debug_message()
             if message:
-                print(f"[{self._debug_label}] reloaded {message}")
+                logger.info("[%s] reloaded %s", self._debug_label, message)
             else:
-                print(f"[{self._debug_label}] reloaded")
+                logger.info("[%s] reloaded", self._debug_label)
 
 
 class CommonRuntimeConfig(JsonFileConfig):

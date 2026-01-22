@@ -16,6 +16,14 @@ const logger = pino({ level: process.env.LOG_LEVEL || "error" })
 
 let sock = null
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function randomDelayMs(minMs = 500, maxMs = 2000) {
+  return Math.floor(minMs + Math.random() * (maxMs - minMs))
+}
+
 
 // --------------------
 // NORMALIZATION
@@ -81,7 +89,7 @@ function buildEvent(msg) {
     sender_name: msg.pushName || null,
     contact_name: contact?.contact_name || null,
     contact_phone: contact?.contact_phone || null,
-    raw: CONFIG.FORWARD_RAW ? msg : undefined,
+    raw: msg,
   }
 }
 
@@ -132,14 +140,6 @@ async function startSocket() {
     if (type !== "notify") return
 
     for (const msg of messages) {
-      if (CONFIG.SETUP_MODE) {
-        const jid = msg.key?.remoteJid
-        if (jid) {
-          const label = jid.endsWith("@g.us") ? "GROUP ID" : "CHAT ID"
-          logger.info({ jid }, label)
-        }
-      }
-
       if (!msg.message) continue
 
       const event = buildEvent(msg)
@@ -185,6 +185,7 @@ app.post("/send", async (req, res) => {
   }
 
   try {
+    await sleep(randomDelayMs())
     await sock.sendMessage(jidNormalizedUser(to), { text })
     res.json({ status: "ok" })
   } catch (err) {
