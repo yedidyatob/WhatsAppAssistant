@@ -110,7 +110,7 @@ async def handle_event(request: Request):
 2. **Update Environment**
 Append your new service URL to `WHATSAPP_EVENT_TARGETS` in your `.env`.
 
-#### Troubleshooting
+## 🩺 Troubleshooting
 If you are logged out of WhatsApp or get a connection error loop,
 remove the auth folder and reconnect:
 ```bash
