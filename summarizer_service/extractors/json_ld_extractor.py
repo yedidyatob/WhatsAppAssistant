@@ -1,5 +1,6 @@
 import json
 import logging
+
 from bs4 import BeautifulSoup
 
 from extractors.base_extractor import ArticleTextExtractor
@@ -12,16 +13,19 @@ ARTICLE_TYPES = {
     "AnalysisNewsArticle",
 }
 
+logger = logging.getLogger(__name__)
+
+
 class JsonLDExtractor(ArticleTextExtractor):
 
-    def extract(self, html: str) -> str:
+    def extract(self, html: str) -> tuple[str, str]:
         """
-            Returns (title, text) if found, else (None, None)
-            """
+        Returns (title, text) if found, else ("", "").
+        """
         soup = BeautifulSoup(html, "html.parser")
         scripts = soup.find_all("script", type="application/ld+json")
 
-        logging.info("JSON-LD scripts found: %d", len(scripts))
+        logger.info("JSON-LD scripts found: %d", len(scripts))
 
         for idx, script in enumerate(scripts):
             try:
@@ -47,12 +51,12 @@ class JsonLDExtractor(ArticleTextExtractor):
                 title = obj.get("headline") or obj.get("name")
 
                 if body and len(body) > 500:
-                    logging.info(
+                    logger.info(
                         "JSON-LD article found (script %d, %d chars)",
                         idx,
                         len(body),
                     )
                     return title, body
 
-        logging.info("No usable JSON-LD article found")
-        return None, None
+        logger.info("No usable JSON-LD article found")
+        return "", ""

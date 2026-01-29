@@ -1,9 +1,12 @@
+import logging
+
 import trafilatura
 from bs4 import BeautifulSoup
-import logging
 
 from extractors.base_extractor import ArticleTextExtractor
 from extractors.json_ld_extractor import JsonLDExtractor
+
+logger = logging.getLogger(__name__)
 
 class TrafilaturaArticleTextExtractor(ArticleTextExtractor):
 
@@ -16,19 +19,19 @@ class TrafilaturaArticleTextExtractor(ArticleTextExtractor):
             if soup.title and soup.title.string:
                 title = soup.title.string.strip()
         except Exception as e:
-            logging.error(f"Failed to extract <title>: {e}")
+            logger.warning("Failed to extract <title>: %s", e)
 
         # 2️⃣ Extract main article text via Trafilatura
         try:
             text = trafilatura.extract(html)
             if text:
-                logging.info(f"Trafilatura extracted {len(text)} characters")
+                logger.info("Trafilatura extracted %s characters", len(text))
                 if len(text) > 800:
                     return title, text
         except Exception as e:
-            logging.error(f"Trafilatura extraction failed: {e}")
+            logger.warning("Trafilatura extraction failed: %s", e)
             
-        logging.warning("Very short text or extraction failed, attempting JSON-LD fallback")
+        logger.warning("Very short text or extraction failed, attempting JSON-LD fallback")
         
         # 3️⃣ Fallback to JSON-LD
         try:
@@ -38,8 +41,8 @@ class TrafilaturaArticleTextExtractor(ArticleTextExtractor):
                 final_title = title if title else json_ld_title
                 return final_title, json_ld_text
         except Exception as e:
-            logging.error(f"JSON-LD extraction failed: {e}")
+            logger.warning("JSON-LD extraction failed: %s", e)
 
         # 4️⃣ Final fallback: return title only (or empty)
-        logging.warning("No text could be extracted")
+        logger.warning("No text could be extracted")
         return title, ""

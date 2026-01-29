@@ -1,19 +1,25 @@
 import logging
-import openai
-from openai import OpenAIError
+
+from openai import OpenAI, OpenAIError
 
 from summarizers.base_summarizer import Summarizer
 
+logger = logging.getLogger(__name__)
+
+
 class GPTSummarizer(Summarizer):
+
+    def __init__(self) -> None:
+        self.client = OpenAI()
 
     def summarize(self, text: str) -> str:
         if not text:
             raise ValueError("Text cannot be empty")
             
-        logging.debug(f"🔥 INPUT length: {len(text)}")
+        logger.debug("Input length: %s", len(text))
         
         try:
-            response = openai.chat.completions.create(
+            response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {
@@ -32,18 +38,19 @@ class GPTSummarizer(Summarizer):
                 max_completion_tokens=1000
             )
             
-            logging.debug(f"OPENAI RAW: {response}")
+            logger.debug("OpenAI response received")
             
             if not response.choices or not response.choices[0].message.content:
                 raise ValueError("OpenAI returned an empty response")
                 
             summary = response.choices[0].message.content
-            logging.debug(f"SUMMARY TEXT: {summary}")
+            logger.debug("Summary length: %s", len(summary))
+            logger.debug("Summary text: %s", summary)
             return summary
             
         except OpenAIError as e:
-            logging.error(f"OpenAI API error: {e}")
+            logger.exception("OpenAI API error: %s", e)
             raise  # Re-raise to be caught by the communicator
         except Exception as e:
-            logging.error(f"Unexpected error in GPTSummarizer: {e}")
+            logger.exception("Unexpected error in GPTSummarizer: %s", e)
             raise

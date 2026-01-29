@@ -7,6 +7,6 @@ ENV NODE_ENV=production
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY bot.mjs config.js ./
+COPY whatsapp_gateway.js config.js ./
 
-CMD ["node", "bot.mjs"]
+CMD ["node", "whatsapp_gateway.js"]

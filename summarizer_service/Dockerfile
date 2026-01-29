@@ -14,18 +14,20 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
+COPY summarizer_service/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install only Chromium and its dependencies (saves space/time)
 RUN playwright install chromium --with-deps
 
 # Copy code
-COPY app.py .
-COPY communicators ./communicators
-COPY extractors ./extractors
-COPY summarizers ./summarizers
-COPY web_page_fetchers ./web_page_fetchers
+COPY summarizer_service/app.py .
+COPY summarizer_service/runtime_config.py .
+COPY shared ./shared
+COPY summarizer_service/communicators ./communicators
+COPY summarizer_service/extractors ./extractors
+COPY summarizer_service/summarizers ./summarizers
+COPY summarizer_service/web_page_fetchers ./web_page_fetchers
 
 EXPOSE 5001
 

@@ -1,11 +1,23 @@
 version: "3.9"
 services:
+  postgres:
+    image: postgres:16
+    container_name: whatsapp_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: timed_messages
+    volumes:
+      - whatsapp_postgres_data:/var/lib/postgresql/data
   summarizer:
     build:
-      context: ./summarizer_service
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: summarizer_service/Dockerfile
     container_name: whatsapp_summarizer
     restart: unless-stopped
+    volumes:
+      - ./config:/app/config
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:5001/health" ]
       interval: 60s
@@ -13,17 +25,73 @@ services:
       retries: 5
     env_file:
       - .env
+    environment:
+      - WHATSAPP_COMMON_CONFIG_PATH=/app/config/common_runtime.json
+      - WHATSAPP_SUMMARIZER_CONFIG_PATH=/app/config/summarizer_runtime.json
 
-  whatsapp_bot:
+  timed_messages:
     build:
-      context: ./whatsapp_client
+      context: .
+      dockerfile: timed_messages/Dockerfile
+    container_name: timed_messages
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+    env_file:
+      - .env
+    environment:
+      - WHATSAPP_COMMON_CONFIG_PATH=/app/config/common_runtime.json
+      - WHATSAPP_TIMED_MESSAGES_CONFIG_PATH=/app/config/timed_messages_runtime.json
+    depends_on:
+      - postgres
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 30s
+      timeout: 3s
+      retries: 5
+
+  timed_messages_worker:
+    build:
+      context: .
+      dockerfile: timed_messages/Dockerfile
+    container_name: timed_messages_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - RUN_MIGRATIONS=0
+      - WHATSAPP_COMMON_CONFIG_PATH=/app/config/common_runtime.json
+      - WHATSAPP_TIMED_MESSAGES_CONFIG_PATH=/app/config/timed_messages_runtime.json
+    volumes:
+      - ./config:/app/config
+    depends_on:
+      postgres:
+        condition: service_started
+      timed_messages:
+        condition: service_healthy
+    command: ["python", "-m", "timed_messages.worker.worker"]
+
+  whatsapp_gateway:
+    build:
+      context: ./whatsapp_gateway
       dockerfile: Dockerfile
     volumes:
       - ./auth:/app/auth
-    container_name: whatsapp_bot
+    container_name: whatsapp_gateway
     depends_on:
       summarizer:
         condition: service_healthy
+      timed_messages:
+        condition: service_started
     env_file:
       - .env
     restart: unless-stopped
+
+volumes:
+  whatsapp_postgres_data:

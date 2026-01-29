@@ -1,33 +1,34 @@
 import logging
+import os
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
 from extractors.trafilatura_extractor import TrafilaturaArticleTextExtractor
 from summarizers.gpt_summarizer import GPTSummarizer
 from communicators.news_url_communicator import UrlCommunicator
+from shared.logging_utils import configure_logging
 
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+log_level = configure_logging()
+logging.getLogger("werkzeug").setLevel(log_level)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+logger.info("Summarizer commands: !setup summarizer / !stop summarizer")
 
 # Initialize services
 extractor = TrafilaturaArticleTextExtractor()
 summarizer = GPTSummarizer()
 communicator = UrlCommunicator(extractor, summarizer)
 
-@app.route("/process", methods=["POST"])
-def process():
-    payload = request.get_json()
+@app.route("/whatsapp/events", methods=["POST"])
+def whatsapp_events():
+    payload = request.get_json(silent=True)
     if not payload:
         return jsonify({"status": "error", "message": "Invalid JSON payload"}), 400
-        
-    result = communicator.process(payload)
+
+    result = communicator.process_whatsapp_event(payload)
     return jsonify(result)
 
 @app.route("/health", methods=["GET"])
@@ -35,4 +36,5 @@ def health():
     return jsonify(status="ok"), 200
 
 if __name__ == "__main__":
-    app.run(port=5001, debug=True, host="0.0.0.0")
+    debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    app.run(port=5001, debug=debug, host="0.0.0.0", use_reloader=debug)
