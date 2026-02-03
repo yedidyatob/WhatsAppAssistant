@@ -51,6 +51,8 @@ docker compose up --build
 
 - `!setup summarizer`
 
+4. **Assistant mode (optional):** Set `WHATSAPP_ASSISTANT_MODE=true`. Each user must DM the bot `!auth` to generate a personal auth code (printed in logs). The admin shares that code, and the user completes auth with `!auth <code>`. Approved numbers are stored in `config/common_runtime.json` under `approved_numbers`.
+
 ## 📱 How to Use
 
 | Feature          | Usage                                                                                     |

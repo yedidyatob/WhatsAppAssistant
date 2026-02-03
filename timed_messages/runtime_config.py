@@ -31,8 +31,17 @@ class TimedMessagesRuntimeConfig(JsonFileConfig):
             data = self._load_from_disk()
             data["admin_setup_code"] = code
             self._write_to_disk(data)
-            self._data = data
+        self._data = data
         return code
+
+    def approved_numbers(self) -> list[str]:
+        return self._common.approved_numbers()
+
+    def add_approved_number(self, number: str) -> None:
+        self._common.add_approved_number(number)
+
+    def remove_approved_number(self, number: str) -> None:
+        self._common.remove_approved_number(number)
 
     def scheduling_group(self) -> str:
         self._refresh_if_changed()

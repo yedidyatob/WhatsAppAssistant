@@ -82,8 +82,41 @@ class CommonRuntimeConfig(JsonFileConfig):
             self._write_to_disk(data)
             self._data = data
 
+    def approved_numbers(self) -> list[str]:
+        self._refresh_if_changed()
+        return list(self._data.get("approved_numbers") or [])
+
+    def add_approved_number(self, number: str) -> None:
+        if not number:
+            return
+        with self._lock:
+            data = self._load_from_disk()
+            approved = list(data.get("approved_numbers") or [])
+            if number not in approved:
+                approved.append(number)
+            data["approved_numbers"] = approved
+            self._write_to_disk(data)
+            self._data = data
+
+    def remove_approved_number(self, number: str) -> None:
+        if not number:
+            return
+        with self._lock:
+            data = self._load_from_disk()
+            approved = list(data.get("approved_numbers") or [])
+            data["approved_numbers"] = [n for n in approved if n != number]
+            self._write_to_disk(data)
+            self._data = data
+
     def _default_data(self) -> Dict[str, Any]:
-        return {"admin_sender_id": ""}
+        return {
+            "admin_sender_id": "",
+            "approved_numbers": [],
+        }
 
 
 common_runtime_config = CommonRuntimeConfig()
+
+
+def assistant_mode_enabled() -> bool:
+    return os.getenv("WHATSAPP_ASSISTANT_MODE", "").lower() == "true"

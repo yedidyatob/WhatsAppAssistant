@@ -21,6 +21,7 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
         return ScheduledMessage(
             id=row["id"],
             chat_id=row["chat_id"],
+            from_chat_id=row.get("from_chat_id"),
             text=row["text"],
             send_at=row["send_at"],
             status=MessageStatus(row["status"]),
@@ -42,13 +43,13 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
             cur.execute(
                 """
                 INSERT INTO scheduled_messages (
-                    id, chat_id, text, send_at, status,
+                    id, chat_id, from_chat_id, text, send_at, status,
                     locked_at, sent_at, attempt_count, last_error,
                     idempotency_key, source, reason,
                     created_at, updated_at
                 )
                 VALUES (
-                    %(id)s, %(chat_id)s, %(text)s, %(send_at)s, %(status)s,
+                    %(id)s, %(chat_id)s, %(from_chat_id)s, %(text)s, %(send_at)s, %(status)s,
                     %(locked_at)s, %(sent_at)s, %(attempt_count)s, %(last_error)s,
                     %(idempotency_key)s, %(source)s, %(reason)s,
                     %(created_at)s, %(updated_at)s
@@ -223,6 +224,7 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
                 UPDATE scheduled_messages
                 SET
                     chat_id = %(chat_id)s,
+                    from_chat_id = %(from_chat_id)s,
                     text = %(text)s,
                     send_at = %(send_at)s,
                     status = %(status)s,

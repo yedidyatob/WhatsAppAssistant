@@ -4,13 +4,16 @@ import os
 import logging
 from datetime import datetime, timezone, timedelta
 import re
+import secrets
 from typing import Optional, TYPE_CHECKING
 from uuid import uuid4, UUID
 from zoneinfo import ZoneInfo
+from urllib.parse import quote
 
 from .models import ScheduledMessage, MessageStatus
 from .repository import ScheduledMessageRepository
 from timed_messages.runtime_config import runtime_config
+from shared.runtime_config import assistant_mode_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +32,7 @@ class TimedMessageService:
         self,
         *,
         chat_id: str,
+        from_chat_id: str | None = None,
         text: str,
         send_at: datetime,
         idempotency_key: str,
@@ -43,6 +47,9 @@ class TimedMessageService:
         if send_at <= now:
             raise ValueError("send_at must be in the future")
 
+        if assistant_mode_enabled() and not from_chat_id:
+            raise ValueError("from_chat_id required in assistant mode")
+
         # Idempotency check
         existing = self.repo.find_by_idempotency_key(idempotency_key)
         if existing:
@@ -51,6 +58,7 @@ class TimedMessageService:
         msg = ScheduledMessage(
             id=uuid4(),
             chat_id=chat_id,
+            from_chat_id=from_chat_id,
             text=text,
             send_at=send_at,
             status=MessageStatus.SCHEDULED,
@@ -132,22 +140,67 @@ class TimedMessageService:
             return
 
         try:
-            transport.send_message(
-                chat_id=msg.chat_id,
-                text=msg.text,
-                message_id=msg.id,
-                quoted_message_id=quoted_message_id
-            )
+            if assistant_mode_enabled():
+                if not msg.from_chat_id:
+                    raise ValueError("from_chat_id is required in assistant mode")
+                delivery_text = self._format_assistant_delivery(msg)
+                transport.send_message(
+                    chat_id=msg.from_chat_id,
+                    text=delivery_text,
+                    message_id=msg.id,
+                    quoted_message_id=quoted_message_id
+                )
+            else:
+                transport.send_message(
+                    chat_id=msg.chat_id,
+                    text=msg.text,
+                    message_id=msg.id,
+                    quoted_message_id=quoted_message_id
+                )
             self.repo.mark_sent(msg_id, sent_at=now)
 
         except Exception as e:
             self.repo.mark_failed(msg_id, error=str(e))
             raise
 
+    def _format_assistant_delivery(self, msg: ScheduledMessage) -> str:
+        link = self._build_whatsapp_link(msg.chat_id, msg.text)
+        to_display = self._display_chat_id(msg.chat_id)
+        preview = (msg.text or "").strip().replace("\n", " ")
+        if len(preview) > 160:
+            preview = f"{preview[:157]}..."
+        if link:
+            return (
+                "⏰ Scheduled message ready\n"
+                f"To: {to_display}\n"
+                f"Text: {preview}\n"
+                f"Send: {link}"
+            )
+        return (
+            "⏰ Scheduled message ready\n"
+            f"To: {to_display}\n"
+            f"Text: {preview}\n"
+            "Send link unavailable for this recipient."
+        )
+
+    def _build_whatsapp_link(self, chat_id: str, text: str) -> str | None:
+        digits = re.sub(r"\D", "", chat_id or "")
+        if not digits:
+            return None
+        encoded = quote(text or "", safe="")
+        return f"https://wa.me/{digits}?text={encoded}"
+
+    def _display_chat_id(self, value: str) -> str:
+        if "@" in value:
+            return value.split("@", 1)[0]
+        return value
+
 
 class WhatsAppEventService:
     _flow_ttl = timedelta(minutes=30)
     _flows: dict[tuple[str, str], dict[str, object]] = {}
+    _auth_ttl = timedelta(minutes=30)
+    _auth_codes: dict[str, dict[str, object]] = {}
 
     def __init__(self, timed_service: TimedMessageService, transport: WhatsAppTransport):
         self.timed_service = timed_service
@@ -177,6 +230,14 @@ class WhatsAppEventService:
                 message_id=message_id,
                 text=text,
             )
+        if normalized_text.startswith("!auth"):
+            return self._handle_assistant_auth(
+                chat_id=chat_id,
+                sender_id=sender_id,
+                message_id=message_id,
+                text=text,
+                is_group=is_group,
+            )
         if normalized_text in {"!setup timed messages", "!stop timed messages"}:
             return self._handle_setup_command(
                 chat_id=chat_id,
@@ -184,6 +245,15 @@ class WhatsAppEventService:
                 message_id=message_id,
                 command=normalized_text,
             )
+
+        if assistant_mode_enabled() and not self._is_sender_approved(sender_id):
+            if not is_group:
+                self._send_reply(
+                    chat_id,
+                    "❌ Unauthorized. Ask the admin for the auth code.",
+                    message_id,
+                )
+            return False, "unauthorized_sender"
 
         allowed_group = runtime_config.scheduling_group()
         if not allowed_group or chat_id != allowed_group:
@@ -289,6 +359,51 @@ class WhatsAppEventService:
         self._send_reply(chat_id, f"✅ Admin set to {sender_id}.", message_id)
         return True, None
 
+    def _handle_assistant_auth(
+        self,
+        *,
+        chat_id: str,
+        sender_id: str,
+        message_id: str,
+        text: str,
+        is_group: bool,
+    ) -> tuple[bool, Optional[str]]:
+        if is_group:
+            self._send_reply(chat_id, "❌ Please DM me to authenticate.", message_id)
+            return False, "auth_in_group"
+
+        normalized = self._normalize_sender_id(sender_id)
+        if normalized in runtime_config.approved_numbers():
+            self._send_reply(chat_id, "✅ Already approved.", message_id)
+            return True, None
+
+        parts = text.strip().split(None, 1)
+        if len(parts) == 1:
+            code = self._generate_auth_code()
+            self._set_pending_auth(sender_id, code, self._now())
+            logger.warning("Assistant auth code for %s: %s", normalized, code)
+            self._send_reply(
+                chat_id,
+                "✅ Auth code generated. Ask the admin for it, then reply: !auth <code>.",
+                message_id,
+            )
+            return True, None
+
+        pending = self._get_pending_auth(sender_id, self._now())
+        if not pending:
+            self._send_reply(chat_id, "❌ No pending auth request. Send !auth to generate a new code.", message_id)
+            return False, "auth_not_requested"
+
+        code = parts[1].strip()
+        if code != pending.get("code"):
+            self._send_reply(chat_id, "❌ Invalid auth code. Send !auth to generate a new code.", message_id)
+            return False, "invalid_auth_code"
+
+        runtime_config.add_approved_number(normalized)
+        self._clear_pending_auth(sender_id)
+        self._send_reply(chat_id, f"✅ Approved: {normalized}.", message_id)
+        return True, None
+
     def _handle_setup_command(
         self,
         *,
@@ -326,6 +441,44 @@ class WhatsAppEventService:
             message_id,
         )
         return True, None
+
+    def _is_sender_approved(self, sender_id: str) -> bool:
+        normalized = self._normalize_sender_id(sender_id)
+        admin_id = runtime_config.admin_sender_id()
+        if admin_id and self._normalize_sender_id(admin_id) == normalized:
+            return True
+        approved = {
+            self._normalize_sender_id(value)
+            for value in runtime_config.approved_numbers()
+            if value
+        }
+        return normalized in approved
+
+    def _normalize_sender_id(self, sender_id: str) -> str:
+        digits = re.sub(r"\D", "", sender_id or "")
+        return digits if digits else (sender_id or "").strip()
+
+    def _generate_auth_code(self) -> str:
+        return f"{secrets.randbelow(1_000_000):06d}"
+
+    def _get_pending_auth(self, sender_id: str, now: datetime) -> Optional[dict[str, object]]:
+        key = self._normalize_sender_id(sender_id)
+        entry = self._auth_codes.get(key)
+        if not entry:
+            return None
+        updated_at = entry.get("updated_at")
+        if isinstance(updated_at, datetime) and now - updated_at > self._auth_ttl:
+            self._auth_codes.pop(key, None)
+            return None
+        return entry
+
+    def _set_pending_auth(self, sender_id: str, code: str, now: datetime) -> None:
+        key = self._normalize_sender_id(sender_id)
+        self._auth_codes[key] = {"code": code, "updated_at": now}
+
+    def _clear_pending_auth(self, sender_id: str) -> None:
+        key = self._normalize_sender_id(sender_id)
+        self._auth_codes.pop(key, None)
 
     def _start_flow(
         self,
@@ -395,6 +548,7 @@ class WhatsAppEventService:
             try:
                 scheduled = self.timed_service.schedule_message(
                     chat_id=str(flow.get("to_chat_id")),
+                    from_chat_id=str(flow.get("sender_id")),
                     text=text.strip(),
                     send_at=flow["send_at"],
                     idempotency_key=str(flow.get("request_id")),

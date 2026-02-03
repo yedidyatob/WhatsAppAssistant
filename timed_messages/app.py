@@ -29,6 +29,8 @@ def log_admin_setup() -> None:
     logger.warning("============================")
 
 
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}

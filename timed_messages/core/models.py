@@ -22,6 +22,7 @@ class MessageStatus(str, Enum):
 class ScheduledMessage(BaseModel):
     id: UUID
     chat_id: str
+    from_chat_id: str | None = None
     text: str
     send_at: datetime
     status: MessageStatus
@@ -41,6 +42,7 @@ class ScheduledMessageRecord(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     chat_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    from_chat_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     send_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[MessageStatus] = mapped_column(
