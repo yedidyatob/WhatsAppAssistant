@@ -109,6 +109,64 @@ class TimedMessageService:
     def list_scheduled_messages(self, limit: int = 10) -> list[ScheduledMessage]:
         return self.repo.list_scheduled(limit=limit)
 
+    def list_scheduled_messages_for_sender(
+        self,
+        *,
+        sender_id: str,
+        limit: int = 10,
+    ) -> list[ScheduledMessage]:
+        normalized_sender = self._normalize_sender_id(sender_id)
+        if not normalized_sender:
+            return []
+        return self.repo.list_scheduled_for_sender(
+            normalized_sender_id=normalized_sender,
+            limit=limit,
+        )
+
+    def find_by_id_prefix_for_sender(
+        self,
+        *,
+        prefix: str,
+        sender_id: str,
+    ) -> ScheduledMessage | None:
+        normalized_sender = self._normalize_sender_id(sender_id)
+        if not normalized_sender:
+            return None
+        matches = self.repo.find_by_id_prefix_for_sender(
+            prefix=prefix,
+            normalized_sender_id=normalized_sender,
+            limit=2,
+        )
+        if not matches:
+            return None
+        if len(matches) > 1:
+            raise ValueError("cancel id is ambiguous; please paste the full ID")
+        return matches[0]
+
+    def set_confirmation_message_id(
+        self,
+        *,
+        msg_id: UUID,
+        confirmation_message_id: str,
+    ) -> None:
+        if not confirmation_message_id:
+            return
+        self.repo.set_confirmation_message_id(msg_id, confirmation_message_id)
+
+    def find_scheduled_by_confirmation_message_id_for_sender(
+        self,
+        *,
+        confirmation_message_id: str,
+        sender_id: str,
+    ) -> ScheduledMessage | None:
+        normalized_sender = self._normalize_sender_id(sender_id)
+        if not normalized_sender or not confirmation_message_id:
+            return None
+        return self.repo.find_scheduled_by_confirmation_message_id_for_sender(
+            confirmation_message_id=confirmation_message_id,
+            normalized_sender_id=normalized_sender,
+        )
+
     def send_message_if_due(
         self,
         msg_id: UUID,
@@ -195,6 +253,10 @@ class TimedMessageService:
             return value.split("@", 1)[0]
         return value
 
+    def _normalize_sender_id(self, sender_id: str) -> str:
+        digits = re.sub(r"\D", "", sender_id or "")
+        return digits if digits else (sender_id or "").strip()
+
 
 class WhatsAppEventService:
     _flow_ttl = timedelta(minutes=30)
@@ -214,13 +276,15 @@ class WhatsAppEventService:
         sender_id: str,
         text: Optional[str],
         quoted_text: Optional[str],
+        quoted_message_id: Optional[str],
         contact_name: Optional[str],
-        contact_phone: Optional[str],
+        contact_phone: Optional[str | list[str]],
         timestamp: datetime,
         is_group: bool,
         raw: Optional[dict],
     ) -> tuple[bool, Optional[str]]:
         text = text.strip() if text else ""
+        assistant_mode = assistant_mode_enabled()
 
         normalized_text = text.strip().lower()
         if normalized_text.startswith("!whoami"):
@@ -239,6 +303,13 @@ class WhatsAppEventService:
                 is_group=is_group,
             )
         if normalized_text in {"!setup timed messages", "!stop timed messages"}:
+            if assistant_mode:
+                self._send_reply(
+                    chat_id,
+                    "ℹ️ Setup commands are not needed in assistant mode.",
+                    message_id,
+                )
+                return True, None
             return self._handle_setup_command(
                 chat_id=chat_id,
                 sender_id=sender_id,
@@ -246,7 +317,7 @@ class WhatsAppEventService:
                 command=normalized_text,
             )
 
-        if assistant_mode_enabled() and not self._is_sender_approved(sender_id):
+        if assistant_mode and not self._is_sender_approved(sender_id):
             if not is_group:
                 self._send_reply(
                     chat_id,
@@ -255,9 +326,10 @@ class WhatsAppEventService:
                 )
             return False, "unauthorized_sender"
 
-        allowed_group = runtime_config.scheduling_group()
-        if not allowed_group or chat_id != allowed_group:
-            return False, "unauthorized_group"
+        if not assistant_mode:
+            allowed_group = runtime_config.scheduling_group()
+            if not allowed_group or chat_id != allowed_group:
+                return False, "unauthorized_group"
 
         flow = self._get_active_flow(chat_id, sender_id, timestamp)
         if flow:
@@ -295,7 +367,12 @@ class WhatsAppEventService:
 
         if command == "cancel":
             try:
-                msg_id = self._resolve_cancel_id(text, quoted_text)
+                msg_id = self._resolve_cancel_id(
+                    text=text,
+                    quoted_text=quoted_text,
+                    quoted_message_id=quoted_message_id,
+                    sender_id=sender_id,
+                )
             except ValueError as exc:
                 self._send_reply(chat_id, f"❌ {exc}", message_id)
                 return False, str(exc)
@@ -313,7 +390,10 @@ class WhatsAppEventService:
             return True, None
 
         if command == "list":
-            scheduled = self.timed_service.list_scheduled_messages(limit=5)
+            scheduled = self.timed_service.list_scheduled_messages_for_sender(
+                sender_id=sender_id,
+                limit=5,
+            )
             reply = self._format_list_reply(scheduled)
             self._send_reply(chat_id, reply, message_id)
             return True, None
@@ -373,7 +453,7 @@ class WhatsAppEventService:
             return False, "auth_in_group"
 
         normalized = self._normalize_sender_id(sender_id)
-        if normalized in runtime_config.approved_numbers():
+        if runtime_config.is_sender_approved(sender_id):
             self._send_reply(chat_id, "✅ Already approved.", message_id)
             return True, None
 
@@ -443,20 +523,10 @@ class WhatsAppEventService:
         return True, None
 
     def _is_sender_approved(self, sender_id: str) -> bool:
-        normalized = self._normalize_sender_id(sender_id)
-        admin_id = runtime_config.admin_sender_id()
-        if admin_id and self._normalize_sender_id(admin_id) == normalized:
-            return True
-        approved = {
-            self._normalize_sender_id(value)
-            for value in runtime_config.approved_numbers()
-            if value
-        }
-        return normalized in approved
+        return runtime_config.is_sender_approved(sender_id)
 
     def _normalize_sender_id(self, sender_id: str) -> str:
-        digits = re.sub(r"\D", "", sender_id or "")
-        return digits if digits else (sender_id or "").strip()
+        return runtime_config.normalize_sender_id(sender_id)
 
     def _generate_auth_code(self) -> str:
         return f"{secrets.randbelow(1_000_000):06d}"
@@ -502,7 +572,7 @@ class WhatsAppEventService:
         message_id: str,
         text: str,
         contact_name: Optional[str],
-        contact_phone: Optional[str],
+        contact_phone: Optional[str | list[str]],
         timestamp: datetime,
     ) -> tuple[bool, Optional[str]]:
         step = flow.get("step")
@@ -513,7 +583,15 @@ class WhatsAppEventService:
             return True, None
 
         if step == "to":
-            normalized = self._normalize_recipient(text, contact_name, contact_phone)
+            normalized_contact_phone, contact_issue = self._normalize_contact_phone(contact_phone)
+            if contact_issue == "multiple_numbers":
+                self._send_reply(
+                    chat_id,
+                    "❌ Can't send to multiple numbers. Please share one contact with one phone number.",
+                    message_id,
+                )
+                return True, "multiple_recipient_numbers"
+            normalized = self._normalize_recipient(text, contact_name, normalized_contact_phone)
             if not normalized:
                 self._send_reply(
                     chat_id,
@@ -567,7 +645,12 @@ class WhatsAppEventService:
                 to_value=str(flow.get("to_chat_id")),
                 send_at=flow["send_at"],
             )
-            self._send_reply(chat_id, reply, message_id)
+            confirmation_message_id = self._send_reply(chat_id, reply, message_id)
+            if confirmation_message_id:
+                self.timed_service.set_confirmation_message_id(
+                    msg_id=scheduled.id,
+                    confirmation_message_id=confirmation_message_id,
+                )
             self._flows.pop((chat_id, str(flow.get("sender_id"))), None)
             return True, None
 
@@ -576,6 +659,20 @@ class WhatsAppEventService:
     def _parse_datetime(self, value: str, tz_name: str | None) -> datetime:
         value = value.strip()
         lowered = value.lower()
+        tz = self._load_timezone(tz_name)
+        now = self._now().astimezone(tz)
+
+        # Fast path: HH:MM means the next occurrence in the configured timezone.
+        if re.fullmatch(r"\d{1,2}:\d{2}", value):
+            try:
+                time_part = datetime.strptime(value, "%H:%M").time()
+            except ValueError as exc:
+                raise ValueError("invalid time (use HH:MM)") from exc
+            send_at = datetime.combine(now.date(), time_part, tzinfo=tz)
+            if send_at <= now:
+                send_at = send_at + timedelta(days=1)
+            return send_at
+
         if lowered.startswith("today") or lowered.startswith("tomorrow"):
             parts = lowered.split()
             if len(parts) < 2:
@@ -584,8 +681,6 @@ class WhatsAppEventService:
                 time_part = datetime.strptime(parts[1], "%H:%M").time()
             except ValueError as exc:
                 raise ValueError("invalid time (use HH:MM)") from exc
-            tz = self._load_timezone(tz_name)
-            now = self._now().astimezone(tz)
             base_date = now.date()
             if parts[0] == "tomorrow":
                 base_date = base_date + timedelta(days=1)
@@ -596,7 +691,7 @@ class WhatsAppEventService:
             send_at = datetime.strptime(value, "%Y-%m-%d %H:%M")
         except ValueError as exc:
             raise ValueError("invalid 'at' format (use YYYY-MM-DD HH:MM)") from exc
-        return send_at.replace(tzinfo=self._load_timezone(tz_name))
+        return send_at.replace(tzinfo=tz)
 
     def _now(self) -> datetime:
         return self.timed_service.clock()
@@ -605,7 +700,7 @@ class WhatsAppEventService:
         tz_name = os.getenv("DEFAULT_TIMEZONE") or "UTC"
         return (
             "*When?*\nUse YYYY-MM-DD HH:MM\n"
-            "Or use 'today' / 'tomorrow'.\n"
+            "Or use HH:MM / 'today HH:MM' / 'tomorrow HH:MM'.\n"
             "For example: today 18:30\n"
             f"(Current time zone: {tz_name})"
         )
@@ -632,6 +727,29 @@ class WhatsAppEventService:
 
         return None
 
+    def _normalize_contact_phone(
+        self,
+        contact_phone: Optional[str | list[str]],
+    ) -> tuple[Optional[str], Optional[str]]:
+        if isinstance(contact_phone, list):
+            normalized = []
+            for value in contact_phone:
+                digits = re.sub(r"\D", "", str(value or ""))
+                if len(digits) >= 8 and digits not in normalized:
+                    normalized.append(digits)
+            if len(normalized) > 1:
+                return None, "multiple_numbers"
+            if len(normalized) == 1:
+                return normalized[0], None
+            return None, None
+
+        if not contact_phone:
+            return None, None
+        digits = re.sub(r"\D", "", str(contact_phone))
+        if len(digits) >= 8:
+            return digits, None
+        return None, None
+
     def _load_timezone(self, tz_name: str | None) -> ZoneInfo:
         if not tz_name:
             raise ValueError("timezone required; add 'tz:' or set DEFAULT_TIMEZONE")
@@ -640,15 +758,33 @@ class WhatsAppEventService:
         except Exception as exc:
             raise ValueError(f"invalid timezone '{tz_name}'") from exc
 
-    def _resolve_cancel_id(self, text: str, quoted_text: Optional[str]) -> UUID | None:
+    def _resolve_cancel_id(
+        self,
+        *,
+        text: str,
+        quoted_text: Optional[str],
+        quoted_message_id: Optional[str],
+        sender_id: str,
+    ) -> UUID | None:
         prefix = self._extract_id_prefix(text) or self._extract_id_prefix(quoted_text)
-        if not prefix:
-            return None
+        if prefix:
+            match = self.timed_service.find_by_id_prefix_for_sender(
+                prefix=prefix,
+                sender_id=sender_id,
+            )
+            if not match:
+                raise ValueError("could not find one of your scheduled messages with that ID")
+            return match.id
 
-        match = self.timed_service.find_by_id_prefix(prefix)
-        if not match:
-            raise ValueError("could not find a scheduled message with that ID")
-        return match.id
+        if quoted_message_id:
+            match = self.timed_service.find_scheduled_by_confirmation_message_id_for_sender(
+                confirmation_message_id=quoted_message_id,
+                sender_id=sender_id,
+            )
+            if match:
+                return match.id
+
+        return None
 
     def _extract_id_prefix(self, text: Optional[str]) -> Optional[str]:
         if not text:
@@ -679,15 +815,15 @@ class WhatsAppEventService:
             lines.append(f"- {msg.id.hex[:12]} | {when} | {preview}")
         return "\n".join(lines)
 
-    def _send_reply(self, chat_id: str, text: str, quoted_message_id: str | None) -> None:
+    def _send_reply(self, chat_id: str, text: str, quoted_message_id: str | None) -> str | None:
         try:
-            self.transport.send_message(
+            return self.transport.send_message(
                 chat_id=chat_id,
                 text=text,
                 quoted_message_id=quoted_message_id,
             )
         except Exception:
-            pass
+            return None
 
     def _format_datetime(self, value: datetime) -> str:
         tz_name = os.getenv("DEFAULT_TIMEZONE")

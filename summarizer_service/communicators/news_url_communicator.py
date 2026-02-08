@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 from typing import Optional, Dict, Any
 
@@ -9,6 +8,7 @@ from web_page_fetchers.playwright_web_page_fetcher import PlaywrightFetcher
 from extractors.base_extractor import ArticleTextExtractor
 from summarizers.base_summarizer import Summarizer
 from runtime_config import runtime_config
+from shared.runtime_config import assistant_mode_enabled, whatsapp_gateway_url
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class UrlCommunicator:
         self.extractor = extractor
         self.summarizer = summarizer
         self.fetcher = PlaywrightFetcher()
-        self.gateway_url = os.getenv("WHATSAPP_GATEWAY_URL", "http://whatsapp_gateway:3000")
+        self.gateway_url = whatsapp_gateway_url()
 
     def extract_url(self, text: str) -> Optional[str]:
         match = re.search(self.URL_REGEX, text)
@@ -33,25 +33,52 @@ class UrlCommunicator:
         text = payload.get("text") or ""
         quoted_text = payload.get("quoted_text")
         sender_id = payload.get("sender_id") or ""
+        assistant_mode = assistant_mode_enabled()
 
         normalized = text.strip().lower()
+        if normalized.startswith("!auth") or normalized.startswith("!whoami"):
+            logger.info(
+                "Ignored whatsapp event: auth_or_admin_command chat_id=%s",
+                chat_id,
+            )
+            return {"status": "ok", "accepted": False, "reason": "auth_or_admin_command"}
+
         if normalized in {"!setup summarizer", "!stop summarizer"}:
+            if assistant_mode:
+                logger.info("Ignored setup command in assistant mode chat_id=%s", chat_id)
+                return {"status": "ok", "accepted": False, "reason": "setup_not_required"}
             return self._handle_setup_command(chat_id, sender_id, normalized)
 
-        allowed_groups = set(runtime_config.allowed_groups())
-        if chat_id not in allowed_groups:
-            logger.info("Rejected whatsapp event: unauthorized_group chat_id=%s", chat_id)
-            return {"status": "ok", "accepted": False, "reason": "unauthorized_group"}
+        if assistant_mode:
+            if not runtime_config.is_sender_approved(sender_id):
+                logger.info(
+                    "Rejected whatsapp event: unauthorized_sender chat_id=%s sender_id=%s",
+                    chat_id,
+                    sender_id,
+                )
+                return {"status": "ok", "accepted": False, "reason": "unauthorized_sender"}
+            input_text = quoted_text.strip() if quoted_text else text.strip()
+        else:
+            allowed_groups = set(runtime_config.allowed_groups())
+            if chat_id not in allowed_groups:
+                logger.info("Rejected whatsapp event: unauthorized_group chat_id=%s", chat_id)
+                return {"status": "ok", "accepted": False, "reason": "unauthorized_group"}
 
-        if "@bot" not in text.lower():
-            logger.info("Ignored whatsapp event: no_bot_tag chat_id=%s", chat_id)
-            return {"status": "ok", "accepted": False, "reason": "no_bot_tag"}
+            if "@bot" not in text.lower():
+                logger.info("Ignored whatsapp event: no_bot_tag chat_id=%s", chat_id)
+                return {"status": "ok", "accepted": False, "reason": "no_bot_tag"}
 
-        cleaned = re.sub(r"@bot", "", text, flags=re.IGNORECASE).strip()
-        input_text = quoted_text.strip() if quoted_text else cleaned
+            cleaned = re.sub(r"@bot", "", text, flags=re.IGNORECASE).strip()
+            input_text = quoted_text.strip() if quoted_text else cleaned
+
+        if not self.extract_url(input_text):
+            logger.info("Ignored whatsapp event: no_url chat_id=%s", chat_id)
+            return {"status": "ok", "accepted": False, "reason": "no_url"}
+
         logger.info(
-            "Accepted whatsapp event: chat_id=%s, tagged=true, input_length=%s",
+            "Accepted whatsapp event: chat_id=%s, assistant_mode=%s, input_length=%s",
             chat_id,
+            assistant_mode,
             len(input_text),
         )
 

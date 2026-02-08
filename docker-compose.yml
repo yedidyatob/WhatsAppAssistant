@@ -92,6 +92,18 @@ services:
     env_file:
       - .env
     restart: unless-stopped
+# TODO: one service for the chosen gateway
+  official_gateway:
+    build:
+      context: ./whatsapp_gateway
+      dockerfile: Dockerfile
+    container_name: official_gateway
+    env_file:
+      - .env
+    command: ["node", "official_gateway.js"]
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
 
 volumes:
   whatsapp_postgres_data:

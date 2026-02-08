@@ -43,6 +43,12 @@ class SummarizerRuntimeConfig(JsonFileConfig):
             self._write_to_disk(data)
             self._data = data
 
+    def normalize_sender_id(self, sender_id: str) -> str:
+        return self._common.normalize_sender_id(sender_id)
+
+    def is_sender_approved(self, sender_id: str) -> bool:
+        return self._common.is_sender_approved(sender_id)
+
     def _default_data(self) -> Dict[str, Any]:
         return {"allowed_groups": []}
 

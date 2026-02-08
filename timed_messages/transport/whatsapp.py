@@ -1,12 +1,12 @@
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 import requests
 from uuid import UUID
 
-DEFAULT_GATEWAY_URL = "http://whatsapp_gateway:3000"
+from shared.runtime_config import whatsapp_gateway_url
+
 logger = logging.getLogger(__name__)
 
 # ---------- Outbound ----------
@@ -16,11 +16,7 @@ class WhatsAppGatewayError(RuntimeError):
 
 class WhatsAppTransport:
     def __init__(self, base_url: str | None = None, timeout_seconds: int = 5):
-        self.base_url = (
-            base_url
-            or os.getenv("WHATSAPP_GATEWAY_URL")
-            or DEFAULT_GATEWAY_URL
-        )
+        self.base_url = base_url or whatsapp_gateway_url()
         self.timeout = timeout_seconds
 
     def send_message(
@@ -28,9 +24,9 @@ class WhatsAppTransport:
         *,
         chat_id: str,
         text: str,
-        message_id: UUID | None = None,  # TODO: do we need?
-        quoted_message_id: str | None = None,  # TODO: how do we quote messages?
-    ) -> None:
+        message_id: UUID | None = None,
+        quoted_message_id: str | None = None, 
+    ) -> str | None:
         payload = {
             "to": chat_id,
             "text": text,
@@ -63,6 +59,8 @@ class WhatsAppTransport:
             raise WhatsAppGatewayError(
                 f"Gateway failed: {data}"
             )
+        outbound_id = data.get("message_id")
+        return str(outbound_id) if outbound_id else None
 
 # ---------- Inbound ----------
 from fastapi import APIRouter, HTTPException, Depends
@@ -81,8 +79,9 @@ class WhatsAppInboundEvent(BaseModel):
     is_group: bool
     text: Optional[str] = None
     quoted_text: Optional[str] = None
+    quoted_message_id: Optional[str] = None
     contact_name: Optional[str] = None
-    contact_phone: Optional[str] = None
+    contact_phone: Optional[str | list[str]] = None
     raw: Optional[Dict[str, Any]] = None
 
 class WhatsAppEventResponse(BaseModel):
@@ -126,6 +125,7 @@ def receive_whatsapp_event(
             sender_id=event.sender_id,
             text=event.text,
             quoted_text=event.quoted_text,
+            quoted_message_id=event.quoted_message_id,
             contact_name=event.contact_name,
             contact_phone=event.contact_phone,
             timestamp=datetime.fromtimestamp(event.timestamp, tz=timezone.utc),

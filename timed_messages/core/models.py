@@ -23,6 +23,7 @@ class ScheduledMessage(BaseModel):
     id: UUID
     chat_id: str
     from_chat_id: str | None = None
+    confirmation_message_id: str | None = None
     text: str
     send_at: datetime
     status: MessageStatus
@@ -43,6 +44,7 @@ class ScheduledMessageRecord(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
     chat_id: Mapped[str] = mapped_column(String(255), nullable=False)
     from_chat_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    confirmation_message_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     send_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[MessageStatus] = mapped_column(
@@ -71,4 +73,5 @@ class ScheduledMessageRecord(Base):
     __table_args__ = (
         Index("ix_scheduled_messages_status_send_at", "status", "send_at"),
         Index("ix_scheduled_messages_send_at", "send_at"),
+        Index("ix_scheduled_messages_confirmation_message_id", "confirmation_message_id"),
     )

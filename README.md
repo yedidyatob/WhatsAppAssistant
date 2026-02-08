@@ -34,6 +34,9 @@ cd WhatsAppLinkReader
 cp .env.example .env
 ```
 Edit `.env` and provide your `OPENAI_API_KEY` and `DEFAULT_TIMEZONE` (e.g., `Asia/Jerusalem`).
+If you plan to use the official Cloud API gateway, also set:
+`WHATSAPP_WEBHOOK_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_CLOUD_TOKEN`,
+`WHATSAPP_PHONE_NUMBER_ID`, and (optionally) `WHATSAPP_GRAPH_VERSION`.
 
 3. **Launch the suite:**
 ```bash
@@ -51,7 +54,23 @@ docker compose up --build
 
 - `!setup summarizer`
 
-4. **Assistant mode (optional):** Set `WHATSAPP_ASSISTANT_MODE=true`. Each user must DM the bot `!auth` to generate a personal auth code (printed in logs). The admin shares that code, and the user completes auth with `!auth <code>`. Approved numbers are stored in `config/common_runtime.json` under `approved_numbers`.
+### Official Cloud API Gateway (optional)
+If you want to use Meta's official Cloud API (recommended with assistant mode):
+
+1. **Enable assistant mode**: set `WHATSAPP_ASSISTANT_MODE=true`.
+2. **Set Cloud API env vars** in `.env` (see above).
+3. **Webhook URL**: point your WhatsApp Cloud API webhook to:
+   `https://<your-domain>/` (path is `/`).
+4. **mTLS** (Nginx example):
+   - Download Meta's outbound root certificate and place it at
+     `/etc/ssl/certs/meta-outbound-api-ca-2025-12.pem` (or update the path).
+   - Enable client verification and validate the CN
+     `client.webhooks.fbclientcerts.com`.
+
+> Note: When assistant mode is enabled, services will use the official gateway
+> for outbound messages by default. The Baileys gateway remains available.
+
+4. **Assistant mode (optional):** Set `WHATSAPP_ASSISTANT_MODE=true`. Each user must DM the bot `!auth` to generate a personal auth code (printed in logs). The admin shares that code, and the user completes auth with `!auth <code>`. Approved numbers are stored in `config/common_runtime.json` under `approved_numbers`. In assistant mode, group setup commands (`!setup timed messages`, `!setup summarizer`) are not required.
 
 ## 📱 How to Use
 
@@ -59,7 +78,7 @@ docker compose up --build
 |------------------|-------------------------------------------------------------------------------------------|
 | **Schedule Message** | Type `add`. The bot will guide you through an interactive flow to set the content and time. |
 | **Manage Schedule**  | Use `list` to see pending messages. To delete one, simply **Reply** to the bot's "Scheduled..." confirmation message with the word `cancel` .                             |
-| **Summarize Link**   | Tag the bot with `@bot` in a message with a link, or **Reply** to any link with `@bot`.           |
+| **Summarize Link**   | Standard mode: tag the bot with `@bot` in a message with a link, or **Reply** to any link with `@bot`. Assistant mode: any message with a URL from an approved sender is summarized automatically. |
 
 ---
 

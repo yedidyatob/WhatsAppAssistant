@@ -22,6 +22,7 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
             id=row["id"],
             chat_id=row["chat_id"],
             from_chat_id=row.get("from_chat_id"),
+            confirmation_message_id=row.get("confirmation_message_id"),
             text=row["text"],
             send_at=row["send_at"],
             status=MessageStatus(row["status"]),
@@ -43,13 +44,13 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
             cur.execute(
                 """
                 INSERT INTO scheduled_messages (
-                    id, chat_id, from_chat_id, text, send_at, status,
+                    id, chat_id, from_chat_id, confirmation_message_id, text, send_at, status,
                     locked_at, sent_at, attempt_count, last_error,
                     idempotency_key, source, reason,
                     created_at, updated_at
                 )
                 VALUES (
-                    %(id)s, %(chat_id)s, %(from_chat_id)s, %(text)s, %(send_at)s, %(status)s,
+                    %(id)s, %(chat_id)s, %(from_chat_id)s, %(confirmation_message_id)s, %(text)s, %(send_at)s, %(status)s,
                     %(locked_at)s, %(sent_at)s, %(attempt_count)s, %(last_error)s,
                     %(idempotency_key)s, %(source)s, %(reason)s,
                     %(created_at)s, %(updated_at)s
@@ -91,6 +92,28 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
             rows = cur.fetchall()
             return [self._row_to_model(r) for r in rows]
 
+    def find_by_id_prefix_for_sender(
+        self,
+        prefix: str,
+        normalized_sender_id: str,
+        limit: int = 2,
+    ) -> list[ScheduledMessage]:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM scheduled_messages
+                WHERE
+                    REPLACE(id::text, '-', '') LIKE %s
+                    AND regexp_replace(COALESCE(from_chat_id, ''), '[^0-9]', '', 'g') = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (f"{prefix}%", normalized_sender_id, limit),
+            )
+            rows = cur.fetchall()
+            return [self._row_to_model(r) for r in rows]
+
     def find_due(self, now: datetime, limit: int) -> list[ScheduledMessage]:
         stale_before = now - timedelta(seconds=LOCK_TIMEOUT_SECONDS)
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -128,6 +151,67 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
             )
             rows = cur.fetchall()
             return [self._row_to_model(r) for r in rows]
+
+    def list_scheduled_for_sender(
+        self,
+        normalized_sender_id: str,
+        limit: int,
+    ) -> list[ScheduledMessage]:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM scheduled_messages
+                WHERE
+                    status = 'SCHEDULED'
+                    AND regexp_replace(COALESCE(from_chat_id, ''), '[^0-9]', '', 'g') = %s
+                ORDER BY send_at
+                LIMIT %s
+                """,
+                (normalized_sender_id, limit),
+            )
+            rows = cur.fetchall()
+            return [self._row_to_model(r) for r in rows]
+
+    def set_confirmation_message_id(
+        self,
+        msg_id: UUID,
+        confirmation_message_id: str,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE scheduled_messages
+                SET
+                    confirmation_message_id = %s,
+                    updated_at = %s
+                WHERE id = %s
+                """,
+                (confirmation_message_id, now, msg_id),
+            )
+
+    def find_scheduled_by_confirmation_message_id_for_sender(
+        self,
+        confirmation_message_id: str,
+        normalized_sender_id: str,
+    ) -> ScheduledMessage | None:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM scheduled_messages
+                WHERE
+                    confirmation_message_id = %s
+                    AND status IN ('SCHEDULED', 'LOCKED')
+                    AND regexp_replace(COALESCE(from_chat_id, ''), '[^0-9]', '', 'g') = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (confirmation_message_id, normalized_sender_id),
+            )
+            row = cur.fetchone()
+            return self._row_to_model(row) if row else None
 
     def lock(self, msg_id: UUID, now: datetime) -> bool:
         with self.conn, self.conn.cursor() as cur:
@@ -225,6 +309,7 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
                 SET
                     chat_id = %(chat_id)s,
                     from_chat_id = %(from_chat_id)s,
+                    confirmation_message_id = %(confirmation_message_id)s,
                     text = %(text)s,
                     send_at = %(send_at)s,
                     status = %(status)s,

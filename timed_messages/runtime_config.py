@@ -43,6 +43,12 @@ class TimedMessagesRuntimeConfig(JsonFileConfig):
     def remove_approved_number(self, number: str) -> None:
         self._common.remove_approved_number(number)
 
+    def normalize_sender_id(self, sender_id: str) -> str:
+        return self._common.normalize_sender_id(sender_id)
+
+    def is_sender_approved(self, sender_id: str) -> bool:
+        return self._common.is_sender_approved(sender_id)
+
     def scheduling_group(self) -> str:
         self._refresh_if_changed()
         return str(self._data.get("group_id") or "")
