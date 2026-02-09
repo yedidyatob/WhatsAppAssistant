@@ -668,7 +668,6 @@ class WhatsAppEventService:
                     idempotency_key=str(flow.get("request_id")),
                     source="whatsapp",
                     reason=f"whatsapp:{flow.get('request_id')}",
-                    validate_assistant_window=False,
                 )
             except ValueError as exc:
                 if str(exc) == "send_at must be in the future":
