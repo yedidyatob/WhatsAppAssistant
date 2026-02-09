@@ -76,6 +76,37 @@ class TimedMessageService:
         self.repo.create(msg)
         return msg
 
+    def validate_assistant_schedule_window(
+        self,
+        *,
+        send_at: datetime,
+        now: datetime | None = None,
+    ) -> None:
+        if not assistant_mode_enabled():
+            return
+
+        current = now or self.clock()
+        max_window = self._assistant_schedule_window()
+        if send_at - current <= max_window:
+            return
+
+        hours = int(max_window.total_seconds() // 3600)
+        raise ValueError(
+            "Free version limit: I can only schedule within "
+            f"{hours} hours in assistant mode. "
+            "Long-range scheduling uses paid Meta messaging, and I'm working for free :/"
+        )
+
+    def _assistant_schedule_window(self) -> timedelta:
+        value = os.getenv("WHATSAPP_ASSISTANT_MAX_SCHEDULE_HOURS", "24").strip()
+        try:
+            hours = int(value)
+        except ValueError:
+            hours = 24
+        if hours <= 0:
+            hours = 24
+        return timedelta(hours=hours)
+
     def cancel_message(self, msg_id: UUID) -> None:
         msg = self.repo.get_by_id(msg_id)
         if not msg:
@@ -614,6 +645,11 @@ class WhatsAppEventService:
             if send_at <= self._now():
                 self._send_reply(chat_id, f"❌ Time must be in the future. {self._format_when_prompt()}", message_id)
                 return True, None
+            try:
+                self.timed_service.validate_assistant_schedule_window(send_at=send_at)
+            except ValueError as exc:
+                self._send_reply(chat_id, f"❌ {exc}", message_id)
+                return True, str(exc)
             flow["send_at"] = send_at
             flow["step"] = "text"
             self._send_reply(chat_id, "*What should I say?*", message_id)
@@ -632,6 +668,7 @@ class WhatsAppEventService:
                     idempotency_key=str(flow.get("request_id")),
                     source="whatsapp",
                     reason=f"whatsapp:{flow.get('request_id')}",
+                    validate_assistant_window=False,
                 )
             except ValueError as exc:
                 if str(exc) == "send_at must be in the future":

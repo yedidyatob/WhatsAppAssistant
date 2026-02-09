@@ -53,22 +53,39 @@ function extractQuotedText(msg) {
   )
 }
 
+function extractQuotedMessageId(msg) {
+  const contextInfo =
+    msg.message?.extendedTextMessage?.contextInfo ||
+    msg.message?.imageMessage?.contextInfo ||
+    msg.message?.videoMessage?.contextInfo ||
+    msg.message?.documentMessage?.contextInfo
+  return contextInfo?.stanzaId || null
+}
+
 function extractContact(msg) {
   const contactMessage = msg.message?.contactMessage
   const contactsArray = msg.message?.contactsArrayMessage?.contacts
-  const contact = contactMessage || (Array.isArray(contactsArray) ? contactsArray[0] : null)
-  if (!contact) return null
+  const contacts = contactMessage
+    ? [contactMessage]
+    : (Array.isArray(contactsArray) ? contactsArray : [])
+  if (!contacts.length) return null
 
-  const vcard = contact.vcard || ""
-  const displayName = contact.displayName || null
-  const waidMatch = vcard.match(/waid=(\d+)/i)
-  const telMatch = vcard.match(/TEL[^:]*:([+0-9]+)/i)
-  const rawNumber = (waidMatch && waidMatch[1]) || (telMatch && telMatch[1]) || null
-  const digits = rawNumber ? rawNumber.replace(/\D/g, "") : null
+  const allNumbers = []
+  for (const contact of contacts) {
+    const vcard = contact?.vcard || ""
+    const waidMatches = [...vcard.matchAll(/waid=(\d+)/gi)].map((m) => (m[1] || "").replace(/\D/g, ""))
+    const telMatches = [...vcard.matchAll(/TEL[^:]*:([+0-9]+)/gi)].map((m) => (m[1] || "").replace(/\D/g, ""))
+    allNumbers.push(...waidMatches, ...telMatches)
+  }
+  const uniqueNumbers = [...new Set(allNumbers.filter(Boolean))]
+  const displayName = contacts.length === 1 ? (contacts[0]?.displayName || null) : null
+  const contactPhone = uniqueNumbers.length > 1
+    ? uniqueNumbers
+    : (uniqueNumbers[0] || null)
 
   return {
     contact_name: displayName,
-    contact_phone: digits,
+    contact_phone: contactPhone,
   }
 }
 
@@ -86,6 +103,7 @@ function buildEvent(msg) {
     is_group: isGroup,
     text: normalizeMessage(msg),
     quoted_text: extractQuotedText(msg),
+    quoted_message_id: extractQuotedMessageId(msg),
     sender_name: msg.pushName || null,
     contact_name: contact?.contact_name || null,
     contact_phone: contact?.contact_phone || null,
@@ -186,8 +204,9 @@ app.post("/send", async (req, res) => {
 
   try {
     await sleep(randomDelayMs())
-    await sock.sendMessage(jidNormalizedUser(to), { text })
-    res.json({ status: "ok" })
+    const sent = await sock.sendMessage(jidNormalizedUser(to), { text })
+    const sentMessageId = sent?.key?.id || null
+    res.json({ status: "ok", message_id: sentMessageId })
   } catch (err) {
     logger.error(err)
     res.status(500).json({ status: "error", error: "send failed" })
