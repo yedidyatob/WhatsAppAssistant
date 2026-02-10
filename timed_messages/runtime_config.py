@@ -49,6 +49,12 @@ class TimedMessagesRuntimeConfig(JsonFileConfig):
     def is_sender_approved(self, sender_id: str) -> bool:
         return self._common.is_sender_approved(sender_id)
 
+    def instructions(self) -> dict[str, str]:
+        return self._common.instructions()
+
+    def set_instruction(self, service_name: str, instruction: str) -> None:
+        self._common.set_instruction(service_name, instruction)
+
     def scheduling_group(self) -> str:
         self._refresh_if_changed()
         return str(self._data.get("group_id") or "")

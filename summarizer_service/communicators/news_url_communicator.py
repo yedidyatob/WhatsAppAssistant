@@ -82,6 +82,7 @@ class UrlCommunicator:
             len(input_text),
         )
 
+        self._send_whatsapp(chat_id, "⏳ Summarizing...")
         result = self._summarize_text(input_text)
         if result.get("status") == "ok":
             reply = result.get("summary") or "✅ Done"

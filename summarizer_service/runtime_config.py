@@ -50,6 +50,12 @@ class SummarizerRuntimeConfig(JsonFileConfig):
     def is_sender_approved(self, sender_id: str) -> bool:
         return self._common.is_sender_approved(sender_id)
 
+    def instructions(self) -> dict[str, str]:
+        return self._common.instructions()
+
+    def set_instruction(self, service_name: str, instruction: str) -> None:
+        self._common.set_instruction(service_name, instruction)
+
     def openai_daily_token_budget(self) -> int:
         raw = os.getenv("OPENAI_DAILY_TOKEN_BUDGET", "0").strip()
         try:

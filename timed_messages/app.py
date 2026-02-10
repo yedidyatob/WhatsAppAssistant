@@ -16,9 +16,20 @@ app.include_router(whatsapp_router)
 if os.getenv("TIMED_MESSAGES_ENABLE_DEBUG_API", "").lower() == "true":
     app.include_router(scheduled_messages_router)
 
+
+TIMED_MESSAGES_INSTRUCTION = (
+    "Timed Messages: use *add* to schedule, *list* to view pending messages, "
+    "and cancel by replying *cancel* to a scheduled confirmation."
+)
+
+
 @app.on_event("startup")
 def log_admin_setup() -> None:
+    runtime_config.set_instruction("timed_messages", TIMED_MESSAGES_INSTRUCTION)
     logger.info("Timed messages commands: !setup timed messages / !stop timed messages")
+    logger.info("Instructions:")
+    for _, instruction in runtime_config.instructions().items():
+        logger.info("- %s", instruction)
     if runtime_config.admin_sender_id():
         return
     setup_code = runtime_config.admin_setup_code()

@@ -388,12 +388,8 @@ class WhatsAppEventService:
             )
             return True, None
 
-        if command == "instructions":
-            self._send_reply(
-                chat_id,
-                "Options:\n*add* (interactive scheduling),\n*list* (show scheduled),\n*cancel* (reply 'cancel' to a scheduled message).",
-                message_id,
-            )
+        if command.lower() in ("instructions", "help", "commands", "hi"):
+            self._send_reply(chat_id, self._build_instructions_reply(), message_id)
             return True, None
 
         if command == "cancel":
@@ -512,7 +508,11 @@ class WhatsAppEventService:
 
         runtime_config.add_approved_number(normalized)
         self._clear_pending_auth(sender_id)
-        self._send_reply(chat_id, f"✅ Approved: {normalized}.", message_id)
+        self._send_reply(
+            chat_id,
+            f"✅ Approved: {normalized}.\n\n{self._build_instructions_reply(include_welcome=False)}",
+            message_id,
+        )
         return True, None
 
     def _handle_setup_command(
@@ -849,6 +849,23 @@ class WhatsAppEventService:
             if len(preview) > 40:
                 preview = f"{preview[:37]}..."
             lines.append(f"- {msg.id.hex[:12]} | {when} | {preview}")
+        return "\n".join(lines)
+
+    def _build_instructions_reply(self, *, include_welcome: bool = False) -> str:
+        lines: list[str] = []
+        if include_welcome:
+            lines.append("welcome to the personal assistant bot, here are the commands you can run:")
+        else:
+            lines.append("Here are the commands you can run:")
+
+        instructions = runtime_config.instructions()
+        if instructions:
+            for instruction in instructions.values():
+                lines.append(f"- {instruction}")
+        else:
+            lines.append(
+                "- Timed Messages: use add to schedule, list to view pending messages, and cancel by replying 'cancel' to a scheduled confirmation."
+            )
         return "\n".join(lines)
 
     def _send_reply(self, chat_id: str, text: str, quoted_message_id: str | None) -> str | None:
