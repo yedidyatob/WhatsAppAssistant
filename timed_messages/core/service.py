@@ -332,6 +332,24 @@ class WhatsAppEventService:
                 message_id=message_id,
                 text=text,
                 is_group=is_group,
+                contact_name=contact_name,
+                contact_phone=contact_phone,
+            )
+        if (
+            assistant_mode
+            and not is_group
+            and not runtime_config.is_sender_approved(sender_id)
+            and re.fullmatch(r"\d{6}", text.strip())
+            and self._get_pending_auth(sender_id, self._now())
+        ):
+            return self._handle_assistant_auth(
+                chat_id=chat_id,
+                sender_id=sender_id,
+                message_id=message_id,
+                text=text,
+                is_group=is_group,
+                contact_name=contact_name,
+                contact_phone=contact_phone,
             )
         if normalized_text in {"!setup timed messages", "!stop timed messages"}:
             if assistant_mode:
@@ -474,6 +492,8 @@ class WhatsAppEventService:
         message_id: str,
         text: str,
         is_group: bool,
+        contact_name: Optional[str],
+        contact_phone: Optional[str | list[str]],
     ) -> tuple[bool, Optional[str]]:
         if is_group:
             self._send_reply(chat_id, "❌ Please DM me to authenticate.", message_id)
@@ -485,18 +505,48 @@ class WhatsAppEventService:
             return True, None
 
         parts = text.strip().split(None, 1)
-        if len(parts) == 1:
-            code = self._generate_auth_code()
-            self._set_pending_auth(sender_id, code, self._now())
-            logger.warning("Assistant auth code for %s: %s", normalized, code)
+        pending = self._get_pending_auth(sender_id, self._now())
+        if (
+            len(parts) == 1
+            and pending
+            and re.fullmatch(r"\d{6}", parts[0].strip())
+        ):
+            code = parts[0].strip()
+            if code != pending.get("code"):
+                self._send_reply(
+                    chat_id,
+                    "❌ Invalid auth code. Send !auth to generate a new code.",
+                    message_id,
+                )
+                return False, "invalid_auth_code"
+            runtime_config.add_approved_number(normalized)
+            self._clear_pending_auth(sender_id)
             self._send_reply(
                 chat_id,
-                "✅ Auth code generated. Ask the admin for it, then reply: !auth <code>.",
+                f"✅ Approved: {normalized}.\n\n{self._build_instructions_reply(include_welcome=True)}",
                 message_id,
             )
             return True, None
 
-        pending = self._get_pending_auth(sender_id, self._now())
+        if len(parts) == 1:
+            code = self._generate_auth_code()
+            self._set_pending_auth(sender_id, code, self._now())
+            logger.warning("Assistant auth code for %s: %s", normalized, code)
+            self._notify_admin_auth_request(
+                requester_sender_id=sender_id,
+                requester_chat_id=chat_id,
+                requester_normalized_id=normalized,
+                requester_contact_name=contact_name,
+                requester_contact_phone=contact_phone,
+                code=code,
+            )
+            self._send_reply(
+                chat_id,
+                "✅ Auth code generated. Ask the admin for it, then reply with the 6-digit code.",
+                message_id,
+            )
+            return True, None
+
         if not pending:
             self._send_reply(chat_id, "❌ No pending auth request. Send !auth to generate a new code.", message_id)
             return False, "auth_not_requested"
@@ -576,6 +626,42 @@ class WhatsAppEventService:
     def _set_pending_auth(self, sender_id: str, code: str, now: datetime) -> None:
         key = self._normalize_sender_id(sender_id)
         self._auth_codes[key] = {"code": code, "updated_at": now}
+
+    def _notify_admin_auth_request(
+        self,
+        *,
+        requester_sender_id: str,
+        requester_chat_id: str,
+        requester_normalized_id: str,
+        requester_contact_name: Optional[str],
+        requester_contact_phone: Optional[str | list[str]],
+        code: str,
+    ) -> None:
+        admin_id = runtime_config.admin_sender_id()
+        if not admin_id:
+            return
+
+        normalized_admin = self._normalize_sender_id(admin_id)
+        if requester_normalized_id and requester_normalized_id == normalized_admin:
+            return
+
+        if isinstance(requester_contact_phone, list):
+            phone_values = [str(value).strip() for value in requester_contact_phone if str(value).strip()]
+            phone_display = ", ".join(phone_values) if phone_values else "-"
+        else:
+            phone_display = str(requester_contact_phone or "").strip() or "-"
+
+        name_display = str(requester_contact_name or "").strip() or "-"
+        admin_message = (
+            "🔐 New assistant auth request\n"
+            f"Code: {code}\n"
+            f"Sender: {requester_sender_id}\n"
+            f"Chat: {requester_chat_id}\n"
+            f"Normalized: {requester_normalized_id}\n"
+            f"Name: {name_display}\n"
+            f"Phone: {phone_display}"
+        )
+        self._send_reply(admin_id, admin_message, None)
 
     def _clear_pending_auth(self, sender_id: str) -> None:
         key = self._normalize_sender_id(sender_id)
