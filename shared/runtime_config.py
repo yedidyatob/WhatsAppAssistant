@@ -70,7 +70,9 @@ class CommonRuntimeConfig(JsonFileConfig):
         super().__init__(path, debug_label="common_config")
 
     def _debug_message(self) -> str:
-        return f"admin={self._data.get('admin_sender_id')!r}"
+        instructions = self._data.get("instructions")
+        count = len(instructions) if isinstance(instructions, dict) else 0
+        return f"admin={self._data.get('admin_sender_id')!r} instructions={count}"
 
     def admin_sender_id(self) -> str:
         self._refresh_if_changed()
@@ -115,6 +117,36 @@ class CommonRuntimeConfig(JsonFileConfig):
             self._write_to_disk(data)
             self._data = data
 
+    def instructions(self) -> Dict[str, str]:
+        self._refresh_if_changed()
+        raw = self._data.get("instructions")
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            str(service): str(message)
+            for service, message in raw.items()
+            if str(service).strip() and str(message).strip()
+        }
+
+    def set_instruction(self, service_name: str, instruction: str) -> None:
+        service_name = str(service_name or "").strip()
+        instruction = str(instruction or "").strip()
+        if not service_name:
+            return
+        with self._lock:
+            data = self._load_from_disk()
+            instructions = dict(data.get("instructions") or {})
+            if instruction:
+                if instructions.get(service_name) == instruction:
+                    self._data = data
+                    return
+                instructions[service_name] = instruction
+            else:
+                instructions.pop(service_name, None)
+            data["instructions"] = instructions
+            self._write_to_disk(data)
+            self._data = data
+
     def remove_approved_number(self, number: str) -> None:
         normalized = self.normalize_sender_id(number)
         if not normalized:
@@ -143,6 +175,7 @@ class CommonRuntimeConfig(JsonFileConfig):
         return {
             "admin_sender_id": "",
             "approved_numbers": [],
+            "instructions": {},
         }
 
 
