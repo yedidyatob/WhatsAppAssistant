@@ -66,7 +66,8 @@ class WhatsAppTransport:
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-from ..core.service import TimedMessageService, WhatsAppEventService
+from ..core.service import TimedMessageService
+from ..core.whatsapp_event_service import WhatsAppEventService
 from ..infra.db import get_connection
 from ..infra.repo_sql import PostgresScheduledMessageRepository
 
