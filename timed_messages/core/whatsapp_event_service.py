@@ -19,6 +19,7 @@ from .flow_store import FlowStore, InMemoryFlowStore
 from .models import ScheduledMessage
 from .service import TimedMessageService
 from .whatsapp_formatting import (
+    format_admin_auth_request,
     format_list_reply,
     format_schedule_reply,
     format_when_prompt,
@@ -89,6 +90,9 @@ class WhatsAppEventService:
                 message_id=message_id,
                 text=text,
                 is_group=is_group,
+                contact_name=contact_name,
+                contact_phone=contact_phone,
+                raw=raw,
             )
         if normalized_text in {"!setup timed messages", "!stop timed messages"}:
             if assistant_mode:
@@ -231,6 +235,9 @@ class WhatsAppEventService:
         message_id: str,
         text: str,
         is_group: bool,
+        contact_name: Optional[str],
+        contact_phone: Optional[str | list[str]],
+        raw: Optional[dict],
     ) -> tuple[bool, Optional[str]]:
         if is_group:
             self._send_reply(chat_id, "❌ Please DM me to authenticate.", message_id)
@@ -246,6 +253,15 @@ class WhatsAppEventService:
             code = self._generate_auth_code()
             self._set_pending_auth(sender_id, code, self._now())
             logger.warning("Assistant auth code for %s: %s", normalized, code)
+            self._notify_admin_auth_request(
+                requester_sender_id=sender_id,
+                requester_chat_id=chat_id,
+                requester_normalized_id=normalized,
+                requester_contact_name=contact_name,
+                requester_contact_phone=contact_phone,
+                raw=raw,
+                code=code,
+            )
             self._send_reply(
                 chat_id,
                 "✅ Auth code generated. Ask the admin for it, then reply: !auth <code>.",
@@ -327,6 +343,82 @@ class WhatsAppEventService:
     def _clear_pending_auth(self, sender_id: str) -> None:
         key = self._normalize_sender_id(sender_id)
         self.pending_auth_store.clear(key)
+
+    def _notify_admin_auth_request(
+        self,
+        *,
+        requester_sender_id: str,
+        requester_chat_id: str,
+        requester_normalized_id: str,
+        requester_contact_name: Optional[str],
+        requester_contact_phone: Optional[str | list[str]],
+        raw: Optional[dict],
+        code: str,
+    ) -> None:
+        admin_id = runtime_config.admin_sender_id()
+        if not admin_id:
+            return
+
+        normalized_admin = self._normalize_sender_id(admin_id)
+        if requester_normalized_id and requester_normalized_id == normalized_admin:
+            return
+
+        name_display, phone_display = self._extract_requester_identity(
+            sender_id=requester_sender_id,
+            contact_name=requester_contact_name,
+            contact_phone=requester_contact_phone,
+            raw=raw,
+        )
+
+        admin_message = format_admin_auth_request(
+            code=code,
+            sender=requester_sender_id,
+            chat=requester_chat_id,
+            normalized=requester_normalized_id,
+            name=name_display,
+            phone=phone_display,
+        )
+        self._send_reply(admin_id, admin_message, None)
+
+    def _extract_requester_identity(
+        self,
+        *,
+        sender_id: str,
+        contact_name: Optional[str],
+        contact_phone: Optional[str | list[str]],
+        raw: Optional[dict],
+    ) -> tuple[str, str]:
+        raw_contacts = raw.get("contacts") if isinstance(raw, dict) else None
+        primary_contact = raw_contacts[0] if isinstance(raw_contacts, list) and raw_contacts else {}
+
+        profile_name = None
+        if isinstance(primary_contact, dict):
+            profile = primary_contact.get("profile")
+            if isinstance(profile, dict):
+                profile_name = profile.get("name")
+            if not profile_name:
+                name_obj = primary_contact.get("name")
+                if isinstance(name_obj, dict):
+                    profile_name = name_obj.get("formatted_name")
+
+        display_name = str(contact_name or profile_name or "").strip() or "-"
+
+        if isinstance(contact_phone, list):
+            values = [str(value).strip() for value in contact_phone if str(value).strip()]
+            phone_display = ", ".join(values)
+        else:
+            phone_display = str(contact_phone or "").strip()
+
+        if not phone_display and isinstance(primary_contact, dict):
+            wa_id = str(primary_contact.get("wa_id") or "").strip()
+            if wa_id:
+                phone_display = wa_id
+
+        if not phone_display:
+            normalized_sender = self._normalize_sender_id(sender_id)
+            phone_display = normalized_sender or "-"
+
+        return display_name, phone_display
 
     def _start_flow(
         self,
