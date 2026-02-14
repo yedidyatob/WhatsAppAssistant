@@ -195,7 +195,6 @@ const app = express()
 app.use(express.json())
 
 app.post("/send", async (req, res) => {
-  // TODO: Security - add auth/signature checks for gateway inbound requests.
   const { to, text } = req.body
 
   if (!sock) {
