@@ -138,7 +138,15 @@ class AuthMicroservice:
         self._add_approved_number(normalized)
         self._clear_pending_auth(context.sender_id)
         self._send_reply(context.chat_id, f"✅ Approved: {normalized}.", context.message_id)
-        self._send_reply(context.chat_id, self._build_welcome_message(), context.message_id)
+        self._send_reply(context.chat_id, self.build_instructions_message(include_welcome=True), context.message_id)
+        return True, None
+
+    def handle_instructions_command(self, *, context: AuthCommandContext) -> tuple[bool, Optional[str]]:
+        self._send_reply(
+            context.chat_id,
+            self.build_instructions_message(include_welcome=False),
+            context.message_id,
+        )
         return True, None
 
     def authorize_admin_command(
@@ -191,18 +199,15 @@ class AuthMicroservice:
         )
         self._send_reply(admin_id, admin_message, None)
 
-    def _build_welcome_message(self) -> str:
+    def build_instructions_message(self, *, include_welcome: bool) -> str:
         lines = [
             str(instruction).strip()
             for instruction in self._instructions().values()
             if str(instruction).strip()
         ]
         if not lines:
-            return "🎉 Welcome to the personal assistant bot."
+            return "🎉 Welcome to the personal assistant bot." if include_welcome else "No instructions configured yet."
 
         instructions_block = "\n".join(f"- {line}" for line in lines)
-        return (
-            "🎉 Welcome to the personal assistant bot.\n\n"
-            "Here are the commands you can run:\n"
-            f"{instructions_block}"
-        )
+        prefix = "🎉 Welcome to the personal assistant bot.\n\n" if include_welcome else ""
+        return f"{prefix}Here are the commands you can run:\n{instructions_block}"

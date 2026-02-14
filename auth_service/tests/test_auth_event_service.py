@@ -100,3 +100,40 @@ def test_auth_flow(monkeypatch):
     assert "15551234567" in state["approved_numbers"]
     assert any("welcome to the personal assistant bot" in message.lower() for message in sent)
     assert any("timed messages:" in message.lower() for message in sent)
+
+
+def test_instructions_command_for_approved_sender(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "true")
+    sent = []
+
+    monkeypatch.setattr(runtime_config, "is_sender_approved", lambda value: True)
+    monkeypatch.setattr(
+        runtime_config,
+        "instructions",
+        lambda: {
+            "summarizer": "Summarizer: send any news article link to the assistant and get the summary back as a reply.",
+            "timed_messages": "Timed Messages: use *add* to schedule, *list* to view pending messages, and cancel by replying *cancel* to a scheduled confirmation.",
+        },
+    )
+
+    service = AuthEventService()
+    monkeypatch.setattr(service, "_send_reply", lambda chat_id, text, quoted: sent.append(text))
+    service.auth_service._send_reply = service._send_reply
+
+    handled, reason = service.handle_inbound_event(_event(text="instructions"))
+    assert handled is True
+    assert reason is None
+    assert "Here are the commands you can run:" in sent[-1]
+    assert "Timed Messages:" in sent[-1]
+
+
+def test_plain_code_without_pending_auth_is_ignored(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "false")
+
+    monkeypatch.setattr(runtime_config, "is_sender_approved", lambda value: True)
+
+    service = AuthEventService()
+    handled, reason = service.handle_inbound_event(_event(text="123456"))
+
+    assert handled is False
+    assert reason == "auth_command_only"
