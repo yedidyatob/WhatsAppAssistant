@@ -61,7 +61,7 @@ Use this if you want **assistant mode** and a fully official gateway.
    `https://<your-domain>/` (path is `/`).
 > Note: When assistant mode is enabled, services use the official gateway by default. The Baileys gateway remains available.
 
-**Assistant mode auth flow:** each user must DM the bot `!auth` to generate a personal auth code (printed in logs and sent to admin via WhatsApp). The admin shares that code, and the user completes auth by replying the code to the assistant. Approved numbers are stored in `config/common_runtime.json` under `approved_numbers`.
+**Assistant mode auth flow:** a dedicated Auth service handles `!auth` and `!whoami`. Each user must DM `!auth` to generate a personal auth code (printed in logs and sent to admin via WhatsApp). The admin shares that code, and the user completes auth by replying with the 6-digit code. Approved numbers are stored in `config/common_runtime.json` under `approved_numbers`.
 
 **Scheduling window:** in assistant mode, outbound messages are constrained by Meta's 24-hour free-service window. Use `WHATSAPP_ASSISTANT_MAX_SCHEDULE_HOURS` to control the limit.
 
@@ -75,7 +75,7 @@ docker compose up --build
 
 2. **Link your account**: Watch the gateway logs (`whatsapp-gateway`) and scan the QR code with your WhatsApp app.
 
-3. **Claim Admin rights:** Find the `admin_setup_code` in the logs. In WhatsApp, send the bot a private message: `!whoami <your_code>`.
+3. **Claim Admin rights:** Find the `admin_setup_code` in the `auth_service` logs. In WhatsApp, send the bot a private message: `!whoami <your_code>`.
 
 4. **Activate in groups:** To enable features in a specific group, send:
 - `!setup timed messages`
@@ -98,6 +98,7 @@ This suite operates on a **decoupled push-pull model**, ensuring the WhatsApp co
 
 1. **The Broadcast:** When a message arrives, the **Gateway (Node.js)** sends an HTTP POST (Webhook) to all service URLs in `WHATSAPP_EVENT_TARGETS`.
 2. **The Processing:** Services (Python) process the data independently.
+   - **Auth Service:** Handles `!auth` / `!whoami` commands and updates shared runtime config for approved users/admin state.
    - **Timed Messages Service:** Monitors a **PostgreSQL** database. A dedicated worker "sleeps and polls" the DB to trigger message delivery with high reliability.
    - **Summarizer Service:** Uses **Playwright** to render JS-heavy sites and **Trafilatura** for text extraction before calling the OpenAI API.
 3. **The Callback:** When a service is ready to reply, it calls the Gateway's `/send` endpoint with `{ "to": "<chat_id>", "text": "..." }`. This allows tasks to take as long as they need without blocking the Gateway.

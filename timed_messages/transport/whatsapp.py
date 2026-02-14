@@ -8,7 +8,6 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
-from shared.auth import PendingAuthStore
 from shared.runtime_config import whatsapp_gateway_url
 
 from ..core.flow_store import FlowStore
@@ -98,7 +97,6 @@ class WhatsAppEventResponse(BaseModel):
 def create_router(
     *,
     flow_store: FlowStore,
-    pending_auth_store: PendingAuthStore,
 ) -> APIRouter:
     def get_event_service() -> Generator[WhatsAppEventService, None, None]:
         conn = get_connection()
@@ -109,8 +107,7 @@ def create_router(
             yield WhatsAppEventService(
                 timed_service,
                 transport,
-                flow_store=flow_store,
-                pending_auth_store=pending_auth_store,
+                flow_store=flow_store
             )
         finally:
             conn.close()
