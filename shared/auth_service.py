@@ -56,6 +56,7 @@ class AuthMicroservice:
         get_pending_auth: Callable[[str, datetime], Optional[dict[str, object]]],
         set_pending_auth: Callable[[str, str, datetime], None],
         clear_pending_auth: Callable[[str], None],
+        instructions: Callable[[], dict[str, str]],
         now: Callable[[], datetime],
         extract_requester_identity: Callable[..., tuple[str, str]],
         format_admin_auth_request: Callable[..., str],
@@ -71,6 +72,7 @@ class AuthMicroservice:
         self._get_pending_auth = get_pending_auth
         self._set_pending_auth = set_pending_auth
         self._clear_pending_auth = clear_pending_auth
+        self._instructions = instructions
         self._now = now
         self._extract_requester_identity = extract_requester_identity
         self._format_admin_auth_request = format_admin_auth_request
@@ -101,8 +103,9 @@ class AuthMicroservice:
             self._send_reply(context.chat_id, "✅ Already approved.", context.message_id)
             return True, None
 
-        parts = context.text.strip().split(None, 1)
-        if len(parts) == 1:
+        text = context.text.strip()
+        parts = text.split(None, 1)
+        if text.lower().startswith("!auth") and len(parts) == 1:
             code = self._generate_auth_code()
             self._set_pending_auth(context.sender_id, code, self._now())
             logger.warning("Assistant auth code for %s: %s", normalized, code)
@@ -117,7 +120,7 @@ class AuthMicroservice:
             )
             self._send_reply(
                 context.chat_id,
-                "✅ Auth code generated. Ask the admin for it, then reply: !auth <code>.",
+                "✅ Auth code generated. Ask the admin for it, then reply with the 6-digit code.",
                 context.message_id,
             )
             return True, None
@@ -127,7 +130,7 @@ class AuthMicroservice:
             self._send_reply(context.chat_id, "❌ No pending auth request. Send !auth to generate a new code.", context.message_id)
             return False, "auth_not_requested"
 
-        code = parts[1].strip()
+        code = parts[1].strip() if text.lower().startswith("!auth") and len(parts) > 1 else text
         if code != pending.get("code"):
             self._send_reply(context.chat_id, "❌ Invalid auth code. Send !auth to generate a new code.", context.message_id)
             return False, "invalid_auth_code"
@@ -135,6 +138,7 @@ class AuthMicroservice:
         self._add_approved_number(normalized)
         self._clear_pending_auth(context.sender_id)
         self._send_reply(context.chat_id, f"✅ Approved: {normalized}.", context.message_id)
+        self._send_reply(context.chat_id, self._build_welcome_message(), context.message_id)
         return True, None
 
     def authorize_admin_command(
@@ -186,3 +190,19 @@ class AuthMicroservice:
             phone=phone_display,
         )
         self._send_reply(admin_id, admin_message, None)
+
+    def _build_welcome_message(self) -> str:
+        lines = [
+            str(instruction).strip()
+            for instruction in self._instructions().values()
+            if str(instruction).strip()
+        ]
+        if not lines:
+            return "🎉 Welcome to the personal assistant bot."
+
+        instructions_block = "\n".join(f"- {line}" for line in lines)
+        return (
+            "🎉 Welcome to the personal assistant bot.\n\n"
+            "Here are the commands you can run:\n"
+            f"{instructions_block}"
+        )

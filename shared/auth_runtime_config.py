@@ -52,6 +52,9 @@ class AuthRuntimeConfig(JsonFileConfig):
     def add_approved_number(self, number: str) -> None:
         self._common.add_approved_number(number)
 
+    def instructions(self) -> dict[str, str]:
+        return self._common.instructions()
+
     def _generate_setup_code(self) -> str:
         return f"{int.from_bytes(os.urandom(3), 'big') % 1_000_000:06d}"
 

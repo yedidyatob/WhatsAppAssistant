@@ -23,10 +23,27 @@ def _event(**overrides):
 
 
 def test_auth_service_ignores_non_auth_commands(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "false")
     service = AuthEventService()
     handled, reason = service.handle_inbound_event(_event(text="add"))
     assert handled is False
     assert reason == "auth_command_only"
+
+
+def test_auth_service_prompts_unauthorized_sender_in_assistant_mode(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "true")
+    sent = []
+
+    monkeypatch.setattr(runtime_config, "is_sender_approved", lambda value: False)
+
+    service = AuthEventService()
+    monkeypatch.setattr(service, "_send_reply", lambda chat_id, text, quoted: sent.append(text))
+    service.auth_service._send_reply = service._send_reply
+
+    handled, reason = service.handle_inbound_event(_event(text="hello there"))
+    assert handled is False
+    assert reason == "unauthorized_sender"
+    assert "!auth" in sent[-1]
 
 
 def test_whoami_flow(monkeypatch):
@@ -57,6 +74,14 @@ def test_auth_flow(monkeypatch):
     monkeypatch.setattr(runtime_config, "is_sender_approved", lambda value: "15551234567" in state["approved_numbers"])
     monkeypatch.setattr(runtime_config, "normalize_sender_id", lambda value: "".join(ch for ch in value if ch.isdigit()))
     monkeypatch.setattr(runtime_config, "add_approved_number", lambda value: state["approved_numbers"].add(value))
+    monkeypatch.setattr(
+        runtime_config,
+        "instructions",
+        lambda: {
+            "summarizer": "Summarizer: send any news article link to the assistant and get the summary back as a reply.",
+            "timed_messages": "Timed Messages: use *add* to schedule, *list* to view pending messages, and cancel by replying *cancel* to a scheduled confirmation.",
+        },
+    )
 
     service = AuthEventService()
     monkeypatch.setattr(service, "_send_reply", lambda chat_id, text, quoted: sent.append(text))
@@ -65,10 +90,13 @@ def test_auth_flow(monkeypatch):
 
     handled, reason = service.handle_inbound_event(_event(text="!auth"))
     assert handled is True and reason is None
+    assert "6-digit code" in sent[-1]
 
-    handled, reason = service.handle_inbound_event(_event(text="!auth 111111"))
+    handled, reason = service.handle_inbound_event(_event(text="111111"))
     assert handled is False and reason == "invalid_auth_code"
 
-    handled, reason = service.handle_inbound_event(_event(text="!auth 654321"))
+    handled, reason = service.handle_inbound_event(_event(text="654321"))
     assert handled is True and reason is None
     assert "15551234567" in state["approved_numbers"]
+    assert any("welcome to the personal assistant bot" in message.lower() for message in sent)
+    assert any("timed messages:" in message.lower() for message in sent)

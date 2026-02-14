@@ -66,6 +66,12 @@ class WhatsAppEventService:
         assistant_mode = assistant_mode_enabled()
 
         normalized_text = text.strip().lower()
+        command = text.split(None, 1)[0].lower() if text else ""
+
+        # Auth commands are handled by auth_service; don't emit duplicate unauthorized replies.
+        if command in {"!auth", "!whoami"}:
+            return False, "not_actionable"
+
         if normalized_text in {"!setup timed messages", "!stop timed messages"}:
             if assistant_mode:
                 self._send_reply(
@@ -82,12 +88,6 @@ class WhatsAppEventService:
             )
 
         if assistant_mode and not runtime_config.is_sender_approved(sender_id):
-            if not is_group:
-                self._send_reply(
-                    chat_id,
-                    "❌ Unauthorized. Ask the admin for the auth code.",
-                    message_id,
-                )
             return False, "unauthorized_sender"
 
         if not assistant_mode:
@@ -109,8 +109,6 @@ class WhatsAppEventService:
 
         if not text:
             return False, "no_text"
-
-        command = text.split(None, 1)[0].lower()
 
         if command == "add":
             self._start_flow(chat_id, sender_id, message_id, timestamp)

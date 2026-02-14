@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
 
@@ -9,7 +10,7 @@ from pydantic import BaseModel, Field
 from shared.auth import InMemoryPendingAuthStore, SixDigitAuthCodeGenerator
 from shared.auth_service import AuthMicroservice, AuthCommandContext, AssistantAuthContext
 from shared.logging_utils import configure_logging
-from shared.runtime_config import whatsapp_gateway_url
+from shared.runtime_config import assistant_mode_enabled, whatsapp_gateway_url
 from shared.auth_runtime_config import runtime_config
 from shared.whatsapp_formatting import format_admin_auth_request
 
@@ -79,6 +80,7 @@ class AuthEventService:
             get_pending_auth=self._get_pending_auth,
             set_pending_auth=self._set_pending_auth,
             clear_pending_auth=self._clear_pending_auth,
+            instructions=runtime_config.instructions,
             now=lambda: datetime.now(timezone.utc),
             extract_requester_identity=self._extract_requester_identity,
             format_admin_auth_request=format_admin_auth_request,
@@ -87,6 +89,10 @@ class AuthEventService:
     def handle_inbound_event(self, event: WhatsAppInboundEvent) -> tuple[bool, Optional[str]]:
         text = (event.text or "").strip()
         normalized = text.lower()
+        unauthorized_assistant_sender = (
+            assistant_mode_enabled()
+            and not runtime_config.is_sender_approved(event.sender_id)
+        )
 
         if normalized.startswith("!whoami"):
             return self.auth_service.handle_whoami(
@@ -98,7 +104,9 @@ class AuthEventService:
                 )
             )
 
-        if normalized.startswith("!auth"):
+        if normalized.startswith("!auth") or (
+            unauthorized_assistant_sender and bool(re.fullmatch(r"\d{6}", text))
+        ):
             return self.auth_service.handle_assistant_auth(
                 context=AssistantAuthContext(
                     chat_id=event.chat_id,
@@ -111,6 +119,15 @@ class AuthEventService:
                     raw=event.raw,
                 )
             )
+
+        if unauthorized_assistant_sender:
+            hint = (
+                "🔐 You're not authorized yet. Please send me a private message with !auth to get started."
+                if event.is_group
+                else "🔐 You're not authorized yet. Send !auth to start authentication."
+            )
+            self._send_reply(event.chat_id, hint, event.message_id)
+            return False, "unauthorized_sender"
 
         return False, "auth_command_only"
 

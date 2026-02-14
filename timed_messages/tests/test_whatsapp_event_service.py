@@ -68,7 +68,7 @@ def test_assistant_mode_blocks_unauthorized_sender(fake_repo, fake_transport, fi
 
     assert handled is False
     assert reason == "unauthorized_sender"
-    assert "Unauthorized" in fake_transport.sent[-1]["text"]
+    assert fake_transport.sent == []
 
 
 def test_non_assistant_rejects_wrong_group(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
@@ -320,16 +320,22 @@ def test_no_text_is_not_actionable_when_idle(fake_repo, fake_transport, fixed_no
     assert reason == "no_text"
 
 
-def test_auth_accepts_plain_6_digit_code_when_pending(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
+def test_auth_commands_are_ignored_in_assistant_mode(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
     monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "true")
 
     _, event_service = _service_pair(fake_repo, fake_transport, fixed_now)
-    monkeypatch.setattr(event_service, "_generate_auth_code", lambda: "654321")
 
     handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!auth")
-    assert handled is True and reason is None
+    assert handled is False
+    assert reason == "not_actionable"
+    assert fake_transport.sent == []
 
-    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="654321")
-    assert handled is True and reason is None
-    assert "15551234567" in runtime_state["approved_numbers"]
-    assert "welcome to the personal assistant bot" in fake_transport.sent[-1]["text"]
+    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!auth 654321")
+    assert handled is False
+    assert reason == "not_actionable"
+    assert fake_transport.sent == []
+
+    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!whoami 123456")
+    assert handled is False
+    assert reason == "not_actionable"
+    assert fake_transport.sent == []
