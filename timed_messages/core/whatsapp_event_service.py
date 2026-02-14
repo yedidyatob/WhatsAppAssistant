@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta
 from typing import Optional, TYPE_CHECKING
 from uuid import UUID
@@ -83,7 +84,17 @@ class WhatsAppEventService:
                 message_id=message_id,
                 text=text,
             )
-        if normalized_text.startswith("!auth"):
+        should_handle_assistant_auth = (
+            normalized_text.startswith("!auth")
+            or (
+                assistant_mode
+                and not is_group
+                and not self._is_sender_approved(sender_id)
+                and re.fullmatch(r"\d{6}", text)
+                and self._get_pending_auth(sender_id, self._now())
+            )
+        )
+        if should_handle_assistant_auth:
             return self._handle_assistant_auth(
                 chat_id=chat_id,
                 sender_id=sender_id,
@@ -149,12 +160,8 @@ class WhatsAppEventService:
             )
             return True, None
 
-        if command == "instructions":
-            self._send_reply(
-                chat_id,
-                "Options:\n*add* (interactive scheduling),\n*list* (show scheduled),\n*cancel* (reply 'cancel' to a scheduled message).",
-                message_id,
-            )
+        if command in {"instructions", "help", "commands", "hi"}:
+            self._send_reply(chat_id, self._build_instructions_reply(), message_id)
             return True, None
 
         if command == "cancel":
@@ -249,7 +256,17 @@ class WhatsAppEventService:
             return True, None
 
         parts = text.strip().split(None, 1)
-        if len(parts) == 1:
+        pending = self._get_pending_auth(sender_id, self._now())
+
+        submitted_code: Optional[str] = None
+        include_welcome = False
+        if len(parts) > 1:
+            submitted_code = parts[1].strip()
+        elif pending and re.fullmatch(r"\d{6}", parts[0].strip()):
+            submitted_code = parts[0].strip()
+            include_welcome = True
+
+        if submitted_code is None and len(parts) == 1:
             code = self._generate_auth_code()
             self._set_pending_auth(sender_id, code, self._now())
             logger.warning("Assistant auth code for %s: %s", normalized, code)
@@ -264,24 +281,26 @@ class WhatsAppEventService:
             )
             self._send_reply(
                 chat_id,
-                "✅ Auth code generated. Ask the admin for it, then reply: !auth <code>.",
+                "✅ Auth code generated. Ask the admin for it, then reply with the 6-digit code.",
                 message_id,
             )
             return True, None
 
-        pending = self._get_pending_auth(sender_id, self._now())
         if not pending:
             self._send_reply(chat_id, "❌ No pending auth request. Send !auth to generate a new code.", message_id)
             return False, "auth_not_requested"
 
-        code = parts[1].strip()
-        if code != pending.get("code"):
+        if submitted_code != pending.get("code"):
             self._send_reply(chat_id, "❌ Invalid auth code. Send !auth to generate a new code.", message_id)
             return False, "invalid_auth_code"
 
         runtime_config.add_approved_number(normalized)
         self._clear_pending_auth(sender_id)
-        self._send_reply(chat_id, f"✅ Approved: {normalized}.", message_id)
+        self._send_reply(
+            chat_id,
+            f"✅ Approved: {normalized}.\n\n{self._build_instructions_reply(include_welcome=include_welcome)}",
+            message_id,
+        )
         return True, None
 
     def _handle_setup_command(
@@ -419,6 +438,23 @@ class WhatsAppEventService:
             phone_display = normalized_sender or "-"
 
         return display_name, phone_display
+
+    def _build_instructions_reply(self, *, include_welcome: bool = False) -> str:
+        lines: list[str] = []
+        if include_welcome:
+            lines.append("welcome to the personal assistant bot, here are the commands you can run:")
+        else:
+            lines.append("Here are the commands you can run:")
+
+        instructions = runtime_config.instructions()
+        if instructions:
+            for instruction in instructions.values():
+                lines.append(f"- {instruction}")
+        else:
+            lines.append(
+                "- Timed Messages: use add to schedule, list to view pending messages, and cancel by replying 'cancel' to a scheduled confirmation."
+            )
+        return "\n".join(lines)
 
     def _start_flow(
         self,

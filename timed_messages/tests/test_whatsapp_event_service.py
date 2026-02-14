@@ -124,9 +124,10 @@ def test_auth_happy_path_and_edge_cases(fake_repo, fake_transport, fixed_now, ru
     handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!auth 111111")
     assert handled is False and reason == "invalid_auth_code"
 
-    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!auth 654321")
+    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="654321")
     assert handled is True and reason is None
     assert "15551234567" in runtime_state["approved_numbers"]
+    assert "welcome to the personal assistant bot" in fake_transport.sent[-1]["text"]
 
     handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!auth 654321")
     assert handled is True and reason is None
@@ -242,7 +243,11 @@ def test_help_instructions_and_not_actionable(fake_repo, fake_transport, fixed_n
     _, event_service = _service_pair(fake_repo, fake_transport, fixed_now)
     handled, reason = _handle(event_service, fixed_now, text="instructions")
     assert handled is True and reason is None
-    assert "Options:" in fake_transport.sent[-1]["text"]
+    assert "Here are the commands you can run:" in fake_transport.sent[-1]["text"]
+
+    handled, reason = _handle(event_service, fixed_now, text="help")
+    assert handled is True and reason is None
+    assert "Here are the commands you can run:" in fake_transport.sent[-1]["text"]
 
     handled, reason = _handle(event_service, fixed_now, text="just chatting")
     assert handled is False and reason == "not_actionable"
@@ -400,3 +405,18 @@ def test_no_text_is_not_actionable_when_idle(fake_repo, fake_transport, fixed_no
 
     assert handled is False
     assert reason == "no_text"
+
+
+def test_auth_accepts_plain_6_digit_code_when_pending(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "true")
+
+    _, event_service = _service_pair(fake_repo, fake_transport, fixed_now)
+    monkeypatch.setattr(event_service, "_generate_auth_code", lambda: "654321")
+
+    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!auth")
+    assert handled is True and reason is None
+
+    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="654321")
+    assert handled is True and reason is None
+    assert "15551234567" in runtime_state["approved_numbers"]
+    assert "welcome to the personal assistant bot" in fake_transport.sent[-1]["text"]
