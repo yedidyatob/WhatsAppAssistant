@@ -8,6 +8,7 @@ from web_page_fetchers.playwright_web_page_fetcher import PlaywrightFetcher
 from extractors.base_extractor import ArticleTextExtractor
 from summarizers.base_summarizer import Summarizer
 from runtime_config import runtime_config
+from shared.auth_service import authorize_admin_command
 from shared.runtime_config import assistant_mode_enabled, whatsapp_gateway_url
 
 logger = logging.getLogger(__name__)
@@ -36,12 +37,6 @@ class UrlCommunicator:
         assistant_mode = assistant_mode_enabled()
 
         normalized = text.strip().lower()
-        if normalized.startswith("!auth") or normalized.startswith("!whoami"):
-            logger.info(
-                "Ignored whatsapp event: auth_or_admin_command chat_id=%s",
-                chat_id,
-            )
-            return {"status": "ok", "accepted": False, "reason": "auth_or_admin_command"}
 
         if normalized in {"!setup summarizer", "!stop summarizer"}:
             if assistant_mode:
@@ -99,14 +94,13 @@ class UrlCommunicator:
         return {"status": "ok", "accepted": False, "reason": result.get("type") or "error"}
 
     def _handle_setup_command(self, chat_id: str, sender_id: str, command: str) -> Dict[str, Any]:
-        admin_id = runtime_config.admin_sender_id()
-        if not admin_id:
-            self._send_whatsapp(chat_id, "❌ Admin sender ID not configured.")
-            return {"status": "ok", "accepted": False, "reason": "admin_not_configured"}
-
-        if sender_id != admin_id:
-            self._send_whatsapp(chat_id, "❌ Unauthorized.")
-            return {"status": "ok", "accepted": False, "reason": "unauthorized_admin"}
+        reason = authorize_admin_command(
+            admin_sender_id=runtime_config.admin_sender_id(),
+            sender_id=sender_id,
+            send_reply=lambda text: self._send_whatsapp(chat_id, text),
+        )
+        if reason:
+            return {"status": "ok", "accepted": False, "reason": reason}
 
         if command == "!setup summarizer":
             runtime_config.add_allowed_group(chat_id)

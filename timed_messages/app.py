@@ -3,7 +3,6 @@ import os
 
 from fastapi import FastAPI
 
-from shared.auth import InMemoryPendingAuthStore
 from shared.logging_utils import configure_logging
 from timed_messages.runtime_config import runtime_config
 
@@ -19,7 +18,6 @@ app = FastAPI()
 app.include_router(
     create_whatsapp_router(
         flow_store=InMemoryFlowStore(ttl=WhatsAppEventService._flow_ttl),
-        pending_auth_store=InMemoryPendingAuthStore(ttl=WhatsAppEventService._auth_ttl),
     )
 )
 if os.getenv("TIMED_MESSAGES_ENABLE_DEBUG_API", "").lower() == "true":
@@ -39,14 +37,6 @@ def log_admin_setup() -> None:
     logger.info("Instructions:")
     for _, instruction in runtime_config.instructions().items():
         logger.info("- %s", instruction)
-    if runtime_config.admin_sender_id():
-        return
-    setup_code = runtime_config.admin_setup_code()
-    logger.warning("=== Admin Setup Required ===")
-    logger.warning("Setup code: %s", setup_code)
-    logger.warning("Send this message from your WhatsApp account:")
-    logger.warning("!whoami %s", setup_code)
-    logger.warning("============================")
 
 
 @app.get("/health")

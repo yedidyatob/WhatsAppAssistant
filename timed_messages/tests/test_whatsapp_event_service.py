@@ -82,113 +82,27 @@ def test_non_assistant_rejects_wrong_group(fake_repo, fake_transport, fixed_now,
     assert reason == "unauthorized_group"
 
 
-def test_whoami_requires_valid_setup_code(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
+
+def test_auth_command_not_handled_by_timed_messages(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
     monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "false")
     runtime_state["group_id"] = "group-1"
 
     _, event_service = _service_pair(fake_repo, fake_transport, fixed_now)
-    handled, reason = _handle(event_service, fixed_now, text="!whoami 000000")
+    handled, reason = _handle(event_service, fixed_now, text="!auth")
 
     assert handled is False
-    assert reason == "invalid_setup_code"
-    assert "Invalid setup code" in fake_transport.sent[-1]["text"]
+    assert reason == "not_actionable"
 
 
-def test_whoami_sets_admin_once(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
+def test_whoami_command_not_handled_by_timed_messages(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
     monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "false")
     runtime_state["group_id"] = "group-1"
 
     _, event_service = _service_pair(fake_repo, fake_transport, fixed_now)
     handled, reason = _handle(event_service, fixed_now, text="!whoami 123456")
 
-    assert handled is True
-    assert reason is None
-    assert runtime_state["admin_sender_id"] == "15551234567"
-
-    handled, reason = _handle(event_service, fixed_now, text="!whoami 123456")
-    assert handled is True
-    assert reason is None
-    assert "already set" in fake_transport.sent[-1]["text"].lower()
-
-
-def test_auth_happy_path_and_edge_cases(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
-    monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "true")
-
-    _, event_service = _service_pair(fake_repo, fake_transport, fixed_now)
-    monkeypatch.setattr(event_service, "_generate_auth_code", lambda: "654321")
-
-    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!auth")
-    assert handled is True and reason is None
-    assert "Auth code generated" in fake_transport.sent[-1]["text"]
-
-    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!auth 111111")
-    assert handled is False and reason == "invalid_auth_code"
-
-    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!auth 654321")
-    assert handled is True and reason is None
-    assert "15551234567" in runtime_state["approved_numbers"]
-
-    handled, reason = _handle(event_service, fixed_now, chat_id="dm-1", is_group=False, text="!auth 654321")
-    assert handled is True and reason is None
-    assert "Already approved" in fake_transport.sent[-1]["text"]
-
-
-def test_auth_rejected_in_group(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
-    monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "true")
-
-    _, event_service = _service_pair(fake_repo, fake_transport, fixed_now)
-    handled, reason = _handle(event_service, fixed_now, is_group=True, text="!auth")
-
     assert handled is False
-    assert reason == "auth_in_group"
-
-
-def test_auth_notifies_admin_with_requester_details(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
-    monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "true")
-    runtime_state["admin_sender_id"] = "15559990000"
-
-    _, event_service = _service_pair(fake_repo, fake_transport, fixed_now)
-    monkeypatch.setattr(event_service, "_generate_auth_code", lambda: "654321")
-
-    handled, reason = _handle(
-        event_service,
-        fixed_now,
-        chat_id="dm-1",
-        is_group=False,
-        text="!auth",
-        contact_name="Alice",
-        contact_phone="+972547792585",
-    )
-
-    assert handled is True and reason is None
-    assert len(fake_transport.sent) == 2
-    assert fake_transport.sent[0]["chat_id"] == "15559990000"
-    assert "Code: 654321" in fake_transport.sent[0]["text"]
-    assert "Name: Alice" in fake_transport.sent[0]["text"]
-    assert "Phone: +972547792585" in fake_transport.sent[0]["text"]
-
-
-def test_auth_admin_notification_falls_back_to_raw_contact(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
-    monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "true")
-    runtime_state["admin_sender_id"] = "15559990000"
-
-    _, event_service = _service_pair(fake_repo, fake_transport, fixed_now)
-    monkeypatch.setattr(event_service, "_generate_auth_code", lambda: "654321")
-
-    handled, reason = _handle(
-        event_service,
-        fixed_now,
-        chat_id="dm-1",
-        sender_id="972547792585@s.whatsapp.net",
-        is_group=False,
-        text="!auth",
-        raw={"contacts": [{"wa_id": "972547792585", "profile": {"name": "Bob"}}]},
-    )
-
-    assert handled is True and reason is None
-    assert "Name: Bob" in fake_transport.sent[0]["text"]
-    assert "Phone: 972547792585" in fake_transport.sent[0]["text"]
-
+    assert reason == "not_actionable"
 
 def test_setup_commands_require_admin_when_not_assistant(fake_repo, fake_transport, fixed_now, runtime_state, monkeypatch):
     monkeypatch.setenv("WHATSAPP_ASSISTANT_MODE", "false")
