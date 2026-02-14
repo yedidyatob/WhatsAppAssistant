@@ -19,6 +19,7 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 
 class ScheduleMessageRequest(BaseModel):
     chat_id: str
+    from_chat_id: Optional[str] = None
     text: str
     send_at: datetime = Field(..., description="ISO-8601 timestamp (UTC)")
     idempotency_key: str
@@ -47,6 +48,7 @@ def schedule_message(
     try:
         return service.schedule_message(
             chat_id=payload.chat_id,
+            from_chat_id=payload.from_chat_id,
             text=payload.text,
             send_at=payload.send_at,
             idempotency_key=payload.idempotency_key,

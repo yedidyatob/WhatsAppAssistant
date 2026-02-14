@@ -4,8 +4,26 @@ from uuid import UUID
 import psycopg2
 import psycopg2.extras
 
-from ..core.models import ScheduledMessage, MessageStatus
+from ..core.models import ScheduledMessage
 from ..core.repository import ScheduledMessageRepository
+from .repo_sql_mapper import row_to_scheduled_message
+from .repo_sql_queries import (
+    CANCEL_SQL,
+    FIND_BY_CONFIRMATION_FOR_SENDER_SQL,
+    FIND_BY_ID_PREFIX_FOR_SENDER_SQL,
+    FIND_BY_ID_PREFIX_SQL,
+    FIND_DUE_SQL,
+    FIND_SCHEDULED_SQL,
+    GET_BY_IDEMPOTENCY_SQL,
+    GET_BY_ID_SQL,
+    INSERT_MESSAGE_SQL,
+    LIST_SCHEDULED_FOR_SENDER_SQL,
+    LOCK_FOR_SENDING_SQL,
+    MARK_FAILED_SQL,
+    MARK_SENT_SQL,
+    SET_CONFIRMATION_MESSAGE_ID_SQL,
+    UPDATE_METADATA_SQL,
+)
 
 
 LOCK_TIMEOUT_SECONDS = 300  # 5 minutes
@@ -15,138 +33,117 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
     def __init__(self, conn):
         self.conn = conn
 
-    # ---------- helpers ----------
-
-    def _row_to_model(self, row) -> ScheduledMessage:
-        return ScheduledMessage(
-            id=row["id"],
-            chat_id=row["chat_id"],
-            text=row["text"],
-            send_at=row["send_at"],
-            status=MessageStatus(row["status"]),
-            locked_at=row["locked_at"],
-            sent_at=row["sent_at"],
-            attempt_count=row["attempt_count"],
-            last_error=row["last_error"],
-            idempotency_key=row["idempotency_key"],
-            source=row["source"],
-            reason=row["reason"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-        )
-
     # ---------- interface ----------
 
     def create(self, msg: ScheduledMessage) -> None:
         with self.conn, self.conn.cursor() as cur:
             cur.execute(
-                """
-                INSERT INTO scheduled_messages (
-                    id, chat_id, text, send_at, status,
-                    locked_at, sent_at, attempt_count, last_error,
-                    idempotency_key, source, reason,
-                    created_at, updated_at
-                )
-                VALUES (
-                    %(id)s, %(chat_id)s, %(text)s, %(send_at)s, %(status)s,
-                    %(locked_at)s, %(sent_at)s, %(attempt_count)s, %(last_error)s,
-                    %(idempotency_key)s, %(source)s, %(reason)s,
-                    %(created_at)s, %(updated_at)s
-                )
-                """,
+                INSERT_MESSAGE_SQL,
                 msg.model_dump(),
             )
 
     def get(self, msg_id: UUID) -> ScheduledMessage | None:
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT * FROM scheduled_messages WHERE id = %s",
+                GET_BY_ID_SQL,
                 (msg_id,),
             )
             row = cur.fetchone()
-            return self._row_to_model(row) if row else None
+            return row_to_scheduled_message(row) if row else None
 
     def find_by_idempotency_key(self, key: str) -> ScheduledMessage | None:
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT * FROM scheduled_messages WHERE idempotency_key = %s",
+                GET_BY_IDEMPOTENCY_SQL,
                 (key,),
             )
             row = cur.fetchone()
-            return self._row_to_model(row) if row else None
+            return row_to_scheduled_message(row) if row else None
 
     def find_by_id_prefix(self, prefix: str, limit: int = 2) -> list[ScheduledMessage]:
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                """
-                SELECT *
-                FROM scheduled_messages
-                WHERE REPLACE(id::text, '-', '') LIKE %s
-                ORDER BY created_at DESC
-                LIMIT %s
-                """,
+                FIND_BY_ID_PREFIX_SQL,
                 (f"{prefix}%", limit),
             )
             rows = cur.fetchall()
-            return [self._row_to_model(r) for r in rows]
+            return [row_to_scheduled_message(r) for r in rows]
+
+    def find_by_id_prefix_for_sender(
+        self,
+        prefix: str,
+        normalized_sender_id: str,
+        limit: int = 2,
+    ) -> list[ScheduledMessage]:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                FIND_BY_ID_PREFIX_FOR_SENDER_SQL,
+                (f"{prefix}%", normalized_sender_id, limit),
+            )
+            rows = cur.fetchall()
+            return [row_to_scheduled_message(r) for r in rows]
 
     def find_due(self, now: datetime, limit: int) -> list[ScheduledMessage]:
         stale_before = now - timedelta(seconds=LOCK_TIMEOUT_SECONDS)
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                """
-                SELECT *
-                FROM scheduled_messages
-                WHERE (
-                    status = 'SCHEDULED'
-                    AND send_at <= %s
-                ) OR (
-                    status = 'LOCKED'
-                    AND send_at <= %s
-                    AND (locked_at IS NULL OR locked_at < %s)
-                )
-                ORDER BY send_at
-                LIMIT %s
-                """,
+                FIND_DUE_SQL,
                 (now, now, stale_before, limit),
             )
             rows = cur.fetchall()
-            return [self._row_to_model(r) for r in rows]
+            return [row_to_scheduled_message(r) for r in rows]
 
     def find_scheduled(self, limit: int) -> list[ScheduledMessage]:
         with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                """
-                SELECT *
-                FROM scheduled_messages
-                WHERE status = 'SCHEDULED'
-                ORDER BY send_at
-                LIMIT %s
-                """,
+                FIND_SCHEDULED_SQL,
                 (limit,),
             )
             rows = cur.fetchall()
-            return [self._row_to_model(r) for r in rows]
+            return [row_to_scheduled_message(r) for r in rows]
+
+    def list_scheduled_for_sender(
+        self,
+        normalized_sender_id: str,
+        limit: int,
+    ) -> list[ScheduledMessage]:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                LIST_SCHEDULED_FOR_SENDER_SQL,
+                (normalized_sender_id, limit),
+            )
+            rows = cur.fetchall()
+            return [row_to_scheduled_message(r) for r in rows]
+
+    def set_confirmation_message_id(
+        self,
+        msg_id: UUID,
+        confirmation_message_id: str,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute(
+                SET_CONFIRMATION_MESSAGE_ID_SQL,
+                (confirmation_message_id, now, msg_id),
+            )
+
+    def find_scheduled_by_confirmation_message_id_for_sender(
+        self,
+        confirmation_message_id: str,
+        normalized_sender_id: str,
+    ) -> ScheduledMessage | None:
+        with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                FIND_BY_CONFIRMATION_FOR_SENDER_SQL,
+                (confirmation_message_id, normalized_sender_id),
+            )
+            row = cur.fetchone()
+            return row_to_scheduled_message(row) if row else None
 
     def lock(self, msg_id: UUID, now: datetime) -> bool:
         with self.conn, self.conn.cursor() as cur:
             cur.execute(
-                """
-                UPDATE scheduled_messages
-                SET
-                    status = 'LOCKED',
-                    locked_at = %s,
-                    updated_at = %s
-                WHERE
-                    id = %s
-                    AND (
-                        status = 'SCHEDULED'
-                        OR (
-                            status = 'LOCKED'
-                            AND (locked_at IS NULL OR locked_at < %s)
-                        )
-                    )
-                """,
+                LOCK_FOR_SENDING_SQL,
                 (
                     now,
                     now,
@@ -159,14 +156,7 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
     def mark_sent(self, msg_id: UUID, sent_at: datetime) -> None:
         with self.conn, self.conn.cursor() as cur:
             cur.execute(
-                """
-                UPDATE scheduled_messages
-                SET
-                    status = 'SENT',
-                    sent_at = %s,
-                    updated_at = %s
-                WHERE id = %s
-                """,
+                MARK_SENT_SQL,
                 (sent_at, sent_at, msg_id),
             )
 
@@ -174,15 +164,7 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
         now = datetime.now(timezone.utc)
         with self.conn, self.conn.cursor() as cur:
             cur.execute(
-                """
-                UPDATE scheduled_messages
-                SET
-                    status = 'FAILED',
-                    last_error = %s,
-                    attempt_count = attempt_count + 1,
-                    updated_at = %s
-                WHERE id = %s
-                """,
+                MARK_FAILED_SQL,
                 (error, now, msg_id),
             )
 
@@ -190,15 +172,7 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
         now = datetime.now(timezone.utc)
         with self.conn, self.conn.cursor() as cur:
             cur.execute(
-                """
-                UPDATE scheduled_messages
-                SET
-                    status = 'CANCELLED',
-                    updated_at = %s
-                WHERE
-                    id = %s
-                    AND status != 'SENT'
-                """,
+                CANCEL_SQL,
                 (now, msg_id),
             )
 
@@ -219,22 +193,6 @@ class PostgresScheduledMessageRepository(ScheduledMessageRepository):
         payload["id"] = msg_id
         with self.conn, self.conn.cursor() as cur:
             cur.execute(
-                """
-                UPDATE scheduled_messages
-                SET
-                    chat_id = %(chat_id)s,
-                    text = %(text)s,
-                    send_at = %(send_at)s,
-                    status = %(status)s,
-                    locked_at = %(locked_at)s,
-                    sent_at = %(sent_at)s,
-                    attempt_count = %(attempt_count)s,
-                    last_error = %(last_error)s,
-                    idempotency_key = %(idempotency_key)s,
-                    source = %(source)s,
-                    reason = %(reason)s,
-                    updated_at = %(updated_at)s
-                WHERE id = %(id)s
-                """,
+                UPDATE_METADATA_SQL,
                 payload,
             )

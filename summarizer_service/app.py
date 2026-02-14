@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from extractors.trafilatura_extractor import TrafilaturaArticleTextExtractor
 from summarizers.gpt_summarizer import GPTSummarizer
 from communicators.news_url_communicator import UrlCommunicator
+from runtime_config import runtime_config
 from shared.logging_utils import configure_logging
 
 load_dotenv()
@@ -16,6 +17,14 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 logger.info("Summarizer commands: !setup summarizer / !stop summarizer")
+
+SUMMARIZER_INSTRUCTION = (
+    "Summarizer: send any news article link to the assistant and get the summary back as a reply."
+)
+runtime_config.set_instruction("summarizer", SUMMARIZER_INSTRUCTION)
+logger.info("Instructions:")
+for _, instruction in runtime_config.instructions().items():
+    logger.info("- %s", instruction)
 
 # Initialize services
 extractor = TrafilaturaArticleTextExtractor()

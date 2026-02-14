@@ -10,6 +10,7 @@ services:
       POSTGRES_DB: timed_messages
     volumes:
       - whatsapp_postgres_data:/var/lib/postgresql/data
+
   summarizer:
     build:
       context: .
@@ -28,6 +29,31 @@ services:
     environment:
       - WHATSAPP_COMMON_CONFIG_PATH=/app/config/common_runtime.json
       - WHATSAPP_SUMMARIZER_CONFIG_PATH=/app/config/summarizer_runtime.json
+
+  auth_service:
+    build:
+      context: .
+      dockerfile: auth_service/Dockerfile
+    container_name: auth_service
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+    env_file:
+      - .env
+    environment:
+      - WHATSAPP_COMMON_CONFIG_PATH=/app/config/common_runtime.json
+      - WHATSAPP_AUTH_CONFIG_PATH=/app/config/auth_runtime.json
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:5002/health')",
+        ]
+      interval: 30s
+      timeout: 3s
+      retries: 5
 
   timed_messages:
     build:
@@ -89,8 +115,23 @@ services:
         condition: service_healthy
       timed_messages:
         condition: service_started
+      auth_service:
+        condition: service_healthy
     env_file:
       - .env
+    restart: unless-stopped
+
+  # TODO: one service for the chosen gateway
+  official_gateway:
+    build:
+      context: ./whatsapp_gateway
+      dockerfile: Dockerfile
+    container_name: official_gateway
+    env_file:
+      - .env
+    command: ["node", "official_gateway.js"]
+    ports:
+      - "3000:3000"
     restart: unless-stopped
 
 volumes:
