@@ -104,9 +104,10 @@ class AuthEventService:
                 )
             )
 
-        if normalized.startswith("!auth") or (
-            unauthorized_assistant_sender and bool(re.fullmatch(r"\d{6}", text))
-        ):
+        is_six_digit_code = bool(re.fullmatch(r"\d{6}", text))
+        has_pending_auth = bool(self._get_pending_auth(event.sender_id, datetime.now(timezone.utc)))
+
+        if normalized.startswith("!auth") or (is_six_digit_code and has_pending_auth):
             return self.auth_service.handle_assistant_auth(
                 context=AssistantAuthContext(
                     chat_id=event.chat_id,
@@ -117,6 +118,16 @@ class AuthEventService:
                     contact_name=event.contact_name,
                     contact_phone=event.contact_phone,
                     raw=event.raw,
+                )
+            )
+
+        if normalized in {"instructions", "help", "commands", "hi"}:
+            return self.auth_service.handle_instructions_command(
+                context=AuthCommandContext(
+                    chat_id=event.chat_id,
+                    sender_id=event.sender_id,
+                    message_id=event.message_id,
+                    text=text,
                 )
             )
 
